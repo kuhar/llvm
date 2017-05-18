@@ -9,6 +9,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -102,7 +103,7 @@ InputGraph readInputGraph(std::string path) {
   dbgs() << IFS.good() << "\n";
   InputGraph Graph;
 
-  for (std::string Line; std::getline(IFS, Line);) {
+  for (std::string Line; std::getline(IFS, Line) && !Line.empty();) {
     std::istringstream ISS(Line);
     char Action;
     ISS >> Action;
@@ -151,7 +152,7 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
   GraphCFG &CFG = *CFGPtr;
   BasicBlock* EntryBB = nullptr;
   std::vector<BasicBlock *> Blocks(nodesNum);
-  std::vector<std::vector<BasicBlock *>> Children(nodesNum);
+  std::vector<SmallVector<BasicBlock *, 4>> Children(nodesNum);
 
   auto MakeBB = [&] (StringRef name) -> BasicBlock * {
     return BasicBlock::Create(CFG.context, name, CFG.function);
@@ -193,6 +194,36 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
   return CFGPtr;
 }
 
+struct DFSNumbering {
+  DenseMap<BasicBlock *, unsigned> BBToNum;
+  std::vector<BasicBlock *> NumToBB;
+};
+
+DFSNumbering getDFSNumber(BasicBlock *Entry) {
+  unsigned CurrentNum = 0;
+  constexpr auto SmallSize = 8;
+  SmallPtrSet<BasicBlock *, SmallSize> Visited;
+  SmallVector<BasicBlock *, SmallSize> WorkList;
+  DFSNumbering Numbering;
+
+  WorkList.push_back(Entry);
+  while (!WorkList.empty()) {
+    BasicBlock *BB = WorkList.pop_back_val();
+    if (Visited.count(BB) != 0)
+      continue;
+
+    Numbering.BBToNum[BB] = CurrentNum++;
+    Numbering.NumToBB.push_back(BB);
+
+    Visited.insert(BB);
+    for (const auto& Succ : make_range(succ_begin(BB), succ_end(BB)))
+      if (Visited.count(Succ) == 0)
+        WorkList.push_back(Succ);
+  }
+
+  return Numbering;
+};
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
@@ -209,4 +240,10 @@ int main(int argc, char **argv) {
 
   auto CFG = Graph.toCFG();
   CFG->function->viewCFG();
+
+  const auto DFSNumbers = getDFSNumber(&CFG->function->getEntryBlock());
+
+  dbgs() << "Numbering:\n";
+  for (size_t i = 0; i < DFSNumbers.NumToBB.size(); ++i)
+    dbgs() << DFSNumbers.NumToBB[i]->getName() << ":\t" << i << "\n";
 }
