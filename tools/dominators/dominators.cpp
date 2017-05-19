@@ -197,21 +197,26 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
 }
 
 struct DFSNumbering {
-  DenseMap<BasicBlock *, unsigned> BBToNum;
+  using Index = unsigned;
+  DenseMap<BasicBlock *, Index> BBToNum;
   std::vector<BasicBlock *> NumToBB;
-  DenseMap<BasicBlock *, BasicBlock *> Parents;
+  std::vector<Index> Parents;
 };
 
-DFSNumbering getDFSNumber(BasicBlock *Entry) {
-  unsigned CurrentNum = 0;
-  constexpr auto SmallSize = 8;
-  SmallPtrSet<BasicBlock *, SmallSize> Visited;
-  SmallVector<BasicBlock *, SmallSize> WorkList;
+DFSNumbering getDFSNumbering(BasicBlock *Entry) {
+  using Index = DFSNumbering::Index;
+
+  Index CurrentNum = 0;
+  DenseSet<BasicBlock *> Visited;
+  std::vector<BasicBlock *> WorkList;
+  DenseMap<BasicBlock *, BasicBlock *> ParentMapping;
   DFSNumbering Numbering;
 
+  ParentMapping[Entry] = Entry;
   WorkList.push_back(Entry);
   while (!WorkList.empty()) {
-    BasicBlock *BB = WorkList.pop_back_val();
+    BasicBlock *BB = WorkList.back();
+    WorkList.pop_back();
     if (Visited.count(BB) != 0)
       continue;
 
@@ -222,9 +227,14 @@ DFSNumbering getDFSNumber(BasicBlock *Entry) {
     for (const auto& Succ : make_range(succ_begin(BB), succ_end(BB)))
       if (Visited.count(Succ) == 0) {
         WorkList.push_back(Succ);
-        Numbering.Parents[Succ] = BB;
+        ParentMapping[Succ] = BB;
       }
   }
+
+  Numbering.Parents.reserve(static_cast<size_t>(CurrentNum));
+  for (const auto &Mapping : ParentMapping)
+    Numbering.Parents[Numbering.BBToNum[Mapping.first]] =
+        Numbering.BBToNum[Mapping.second];
 
   return Numbering;
 };
@@ -252,12 +262,8 @@ DomInfo computeDominators(DFSNumbering Numbering) {
   auto &SDoms = Res.SDoms;
   std::vector<unsigned> CompressedPaths;
 
-  auto GetParent = [&] (unsigned i) {
-    return BBToNum[Parents[NumToBB[i]]];
-  };
-
   for (unsigned i = 0; i < NodesNum; ++i) {
-    IDoms[i] = GetParent(i);
+    IDoms[i] = Parents[i];
     SDoms[i] = i;
   }
 
@@ -265,7 +271,7 @@ DomInfo computeDominators(DFSNumbering Numbering) {
   for (unsigned i = NodesNum - 1; i >= 1; --i) {
     auto *Node = NumToBB[i];
 
-    unsigned BestAncestor = GetParent(i);
+    unsigned BestAncestor = Parents[i];
     for (auto *Pred : make_range(pred_begin(Node), pred_end(Node))) {
       assert(BBToNum.count(Pred) != 0);
       auto PredIdx = BBToNum[Pred];
@@ -273,12 +279,12 @@ DomInfo computeDominators(DFSNumbering Numbering) {
       // FIXME: Path compression.
       // Walk up the DFS tree.
       while (PredIdx > i)
-        PredIdx = GetParent(PredIdx);
+        PredIdx = Parents[PredIdx];
 
       BestAncestor = std::min(BestAncestor, PredIdx);
     }
 
-    SDoms[i] = std::min(SDoms[i], BestAncestor); // SDoms[BestAncestor] ?????
+    SDoms[i] = std::min(SDoms[i], SDoms[BestAncestor]);
   }
 
 
@@ -301,7 +307,7 @@ int main(int argc, char **argv) {
   if (ViewCFG)
     CFG->function->viewCFG();
 
-  const auto DFSNumbers = getDFSNumber(&CFG->function->getEntryBlock());
+  const auto DFSNumbers = getDFSNumbering(&CFG->function->getEntryBlock());
 
   dbgs() << "Numbering:\n";
   for (size_t i = 0; i < DFSNumbers.NumToBB.size(); ++i)
