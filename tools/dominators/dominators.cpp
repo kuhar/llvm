@@ -58,6 +58,8 @@ using namespace llvm;
 
 static cl::opt<std::string>
     InputFile(cl::Positional, cl::desc("<input file>"), cl::init("-"));
+static cl::opt<bool>
+    ViewCFG("view-cfg", cl::desc("View CFG"));
 
 struct GraphCFG {
   LLVMContext context;
@@ -197,6 +199,7 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
 struct DFSNumbering {
   DenseMap<BasicBlock *, unsigned> BBToNum;
   std::vector<BasicBlock *> NumToBB;
+  DenseMap<BasicBlock *, BasicBlock *> Parents;
 };
 
 DFSNumbering getDFSNumber(BasicBlock *Entry) {
@@ -217,18 +220,74 @@ DFSNumbering getDFSNumber(BasicBlock *Entry) {
 
     Visited.insert(BB);
     for (const auto& Succ : make_range(succ_begin(BB), succ_end(BB)))
-      if (Visited.count(Succ) == 0)
+      if (Visited.count(Succ) == 0) {
         WorkList.push_back(Succ);
+        Numbering.Parents[Succ] = BB;
+      }
   }
 
   return Numbering;
 };
 
+struct DomInfo {
+  std::vector<unsigned> IDoms;
+  std::vector<unsigned> SDoms;
+
+  DomInfo(unsigned n) : IDoms(n), SDoms(n) {}
+};
+
+DomInfo computeDominators(DFSNumbering Numbering) {
+  auto& Parents = Numbering.Parents;
+  const auto& NumToBB = Numbering.NumToBB;
+  auto& BBToNum = Numbering.BBToNum;
+  assert(Parents.size() == NumToBB.size());
+  assert(NumToBB.size() == BBToNum.size());
+
+  const size_t NodesNum = NumToBB.size();
+  DomInfo Res(NodesNum);
+  if (NodesNum == 0)
+    return Res;
+
+  auto &IDoms = Res.IDoms;
+  auto &SDoms = Res.SDoms;
+  std::vector<unsigned> CompressedPaths;
+
+  auto GetParent = [&] (unsigned i) {
+    return BBToNum[Parents[NumToBB[i]]];
+  };
+
+  for (unsigned i = 0; i < NodesNum; ++i) {
+    IDoms[i] = GetParent(i);
+    SDoms[i] = i;
+  }
+
+  // Compute semidominators.
+  for (unsigned i = NodesNum - 1; i >= 1; --i) {
+    auto *Node = NumToBB[i];
+
+    unsigned BestAncestor = GetParent(i);
+    for (auto *Pred : make_range(pred_begin(Node), pred_end(Node))) {
+      assert(BBToNum.count(Pred) != 0);
+      auto PredIdx = BBToNum[Pred];
+
+      // FIXME: Path compression.
+      // Walk up the DFS tree.
+      while (PredIdx > i)
+        PredIdx = GetParent(PredIdx);
+
+      BestAncestor = std::min(BestAncestor, PredIdx);
+    }
+
+    SDoms[i] = std::min(SDoms[i], BestAncestor); // SDoms[BestAncestor] ?????
+  }
+
+
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "dominators");
-
 
   if (InputFile.empty()) {
     errs() << "No input file\n";
@@ -239,7 +298,8 @@ int main(int argc, char **argv) {
   Graph.dump();
 
   auto CFG = Graph.toCFG();
-  CFG->function->viewCFG();
+  if (ViewCFG)
+    CFG->function->viewCFG();
 
   const auto DFSNumbers = getDFSNumber(&CFG->function->getEntryBlock());
 
