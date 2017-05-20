@@ -196,16 +196,15 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
   return CFGPtr;
 }
 
+using Index = unsigned;
+
 struct DFSNumbering {
-  using Index = unsigned;
   DenseMap<BasicBlock *, Index> BBToNum;
   std::vector<BasicBlock *> NumToBB;
   std::vector<Index> Parents;
 };
 
 DFSNumbering getDFSNumbering(BasicBlock *Entry) {
-  using Index = DFSNumbering::Index;
-
   Index CurrentNum = 0;
   DenseSet<BasicBlock *> Visited;
   std::vector<BasicBlock *> WorkList;
@@ -231,7 +230,7 @@ DFSNumbering getDFSNumbering(BasicBlock *Entry) {
       }
   }
 
-  Numbering.Parents.reserve(static_cast<size_t>(CurrentNum));
+  Numbering.Parents.resize(static_cast<size_t>(CurrentNum));
   for (const auto &Mapping : ParentMapping)
     Numbering.Parents[Numbering.BBToNum[Mapping.first]] =
         Numbering.BBToNum[Mapping.second];
@@ -240,11 +239,37 @@ DFSNumbering getDFSNumbering(BasicBlock *Entry) {
 };
 
 struct DomInfo {
-  std::vector<unsigned> IDoms;
-  std::vector<unsigned> SDoms;
+  std::vector<Index> IDoms;
+  std::vector<Index> SDoms;
 
-  DomInfo(unsigned n) : IDoms(n), SDoms(n) {}
+  DomInfo(Index n) : IDoms(n), SDoms(n) {}
 };
+
+// Non-recursive union-find-based semidominator path walker.
+Index getSDomCandidate(const Index Start, const Index Pred,
+    std::vector<Index> &Parents, std::vector<Index> &Labels) {
+  assert(Pred != Start && "Not a predecessor");
+  if (Pred < Start)
+    return Pred;
+
+  Index Next = Pred;
+  SmallVector<Index, 8> SDomPath;
+  // Walk the SDom path up the spanning tree.
+  do {
+    SDomPath.push_back(Next);
+    Next = Parents[Next];
+  } while (Next > Start);
+
+  // Compress path.
+  for (auto i = SDomPath.size() - 2; i < SDomPath.size(); --i) {
+    const auto Current = SDomPath[i];
+    const auto Parent = SDomPath[i + 1];
+    Labels[Current] = std::min(Labels[Current], Labels[Parent]);
+    Parents[Current] = Parents[Parent];
+  }
+
+  return Labels[Pred];
+}
 
 DomInfo computeDominators(DFSNumbering Numbering) {
   auto& Parents = Numbering.Parents;
@@ -253,41 +278,51 @@ DomInfo computeDominators(DFSNumbering Numbering) {
   assert(Parents.size() == NumToBB.size());
   assert(NumToBB.size() == BBToNum.size());
 
-  const size_t NodesNum = NumToBB.size();
+  const auto NodesNum = static_cast<Index>(Parents.size());
   DomInfo Res(NodesNum);
   if (NodesNum == 0)
     return Res;
 
   auto &IDoms = Res.IDoms;
   auto &SDoms = Res.SDoms;
-  std::vector<unsigned> CompressedPaths;
+  std::vector<Index> Labels(IDoms.size());
 
-  for (unsigned i = 0; i < NodesNum; ++i) {
+  // Step 0: initialize data structures.
+  for (Index i = 0; i < NodesNum; ++i) {
     IDoms[i] = Parents[i];
     SDoms[i] = i;
+    Labels[i] = i;
   }
 
-  // Compute semidominators.
-  for (unsigned i = NodesNum - 1; i >= 1; --i) {
-    auto *Node = NumToBB[i];
-
-    unsigned BestAncestor = Parents[i];
-    for (auto *Pred : make_range(pred_begin(Node), pred_end(Node))) {
-      assert(BBToNum.count(Pred) != 0);
-      auto PredIdx = BBToNum[Pred];
-
-      // FIXME: Path compression.
-      // Walk up the DFS tree.
-      while (PredIdx > i)
-        PredIdx = Parents[PredIdx];
-
-      BestAncestor = std::min(BestAncestor, PredIdx);
+  // Step 1: compute semidominators.
+  for (Index i = NodesNum - 1; i >= 1; --i) {
+    auto *CurrentNode = NumToBB[i];
+    for (auto *PredNode : make_range(pred_begin(CurrentNode),
+                                     pred_end(CurrentNode))) {
+      assert(BBToNum.count(PredNode) != 0);
+      const Index Pred = BBToNum[PredNode];
+      const Index SDomCandidate = getSDomCandidate(i, Pred, Parents, Labels);
+      SDoms[i] = std::min(SDoms[i], SDoms[SDomCandidate]);
     }
-
-    SDoms[i] = std::min(SDoms[i], SDoms[BestAncestor]);
+    // Update Label for the current Node.
+    Labels[i] = SDoms[i];
   }
 
 
+  // Step 3: compute immediate dominators as
+  //   IDoms[i] = NCA(SDoms[i], SpanningTreeParent(i)).
+  // Note that IDoms were initialized to tree parents, so we don't need the
+  // original Parents array.
+  for (Index i = 1; i < NodesNum; ++i) {
+    const auto SDom = SDoms[i];
+    auto IDomCandidate = IDoms[i];
+    while (IDomCandidate > SDom)
+      IDomCandidate = IDoms[IDomCandidate];
+
+    IDoms[i] = IDomCandidate;
+  }
+
+  return Res;
 }
 
 int main(int argc, char **argv) {
@@ -307,9 +342,26 @@ int main(int argc, char **argv) {
   if (ViewCFG)
     CFG->function->viewCFG();
 
-  const auto DFSNumbers = getDFSNumbering(&CFG->function->getEntryBlock());
+  auto DFSNumbers = getDFSNumbering(&CFG->function->getEntryBlock());
 
   dbgs() << "Numbering:\n";
   for (size_t i = 0; i < DFSNumbers.NumToBB.size(); ++i)
     dbgs() << DFSNumbers.NumToBB[i]->getName() << ":\t" << i << "\n";
+  dbgs() << "BBToNum size:\t" << DFSNumbers.BBToNum.size() << "\n";
+  dbgs() << "Parents size:\t" << DFSNumbers.Parents.size() << "\n";
+
+  const auto Dominators = computeDominators(DFSNumbers);
+
+  dbgs() << "\nDominators:\n";
+  for (size_t i = 0; i < Dominators.IDoms.size(); ++i) {
+    auto GetName = [&] (size_t x) -> StringRef { // CLion parse err...
+      return DFSNumbers.NumToBB[x]->getName();
+    };
+
+    const auto S = Dominators.SDoms[i];
+    const auto I = Dominators.IDoms[i];
+    dbgs() << GetName(i) << " (" << i << ")    sdom:\t" << GetName(S) << " (" <<
+              S << ")  idom:\t" << GetName(I) << " (" << I << ")\n";
+  }
+
 }
