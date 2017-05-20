@@ -308,7 +308,6 @@ DomInfo computeDominators(DFSNumbering Numbering) {
     Labels[i] = SDoms[i];
   }
 
-
   // Step 3: compute immediate dominators as
   //   IDoms[i] = NCA(SDoms[i], SpanningTreeParent(i)).
   // Note that IDoms were initialized to tree parents, so we don't need the
@@ -325,6 +324,30 @@ DomInfo computeDominators(DFSNumbering Numbering) {
   return Res;
 }
 
+void addDebugDomInfo(Module &M, const DFSNumbering &Numbering,
+                     const DomInfo &Dominators) {
+  auto *IntTy = IntegerType::get(M.getContext(), 1);
+
+  for (size_t i = 0; i < Dominators.SDoms.size(); ++i) {
+    auto *BB = Numbering.NumToBB[i];
+    auto *SD = Numbering.NumToBB[Dominators.SDoms[i]];
+    auto *ID = Numbering.NumToBB[Dominators.IDoms[i]];
+
+    std::string Buffer;
+    raw_string_ostream RSO(Buffer);
+    IRBuilder<> Builder(BB, BB->begin());
+
+    RSO << "idom___" << ID->getName() << "___";
+    RSO.flush();
+    Builder.CreateAlloca(IntTy, nullptr, Buffer);
+    Buffer.clear();
+
+    RSO << "sdom___" << SD->getName() << "___";
+    RSO.flush();
+    Builder.CreateAlloca(IntTy, nullptr, Buffer);
+  }
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
@@ -339,10 +362,8 @@ int main(int argc, char **argv) {
   Graph.dump();
 
   auto CFG = Graph.toCFG();
-  if (ViewCFG)
-    CFG->function->viewCFG();
 
-  auto DFSNumbers = getDFSNumbering(&CFG->function->getEntryBlock());
+  DFSNumbering DFSNumbers = getDFSNumbering(&CFG->function->getEntryBlock());
 
   dbgs() << "Numbering:\n";
   for (size_t i = 0; i < DFSNumbers.NumToBB.size(); ++i)
@@ -350,7 +371,7 @@ int main(int argc, char **argv) {
   dbgs() << "BBToNum size:\t" << DFSNumbers.BBToNum.size() << "\n";
   dbgs() << "Parents size:\t" << DFSNumbers.Parents.size() << "\n";
 
-  const auto Dominators = computeDominators(DFSNumbers);
+  const DomInfo Dominators = computeDominators(DFSNumbers);
 
   dbgs() << "\nDominators:\n";
   for (size_t i = 0; i < Dominators.IDoms.size(); ++i) {
@@ -364,4 +385,7 @@ int main(int argc, char **argv) {
               S << ")  idom:\t" << GetName(I) << " (" << I << ")\n";
   }
 
+  addDebugDomInfo(CFG->module, DFSNumbers, Dominators);
+  if (ViewCFG)
+    CFG->function->viewCFG();
 }
