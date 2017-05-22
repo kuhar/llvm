@@ -224,7 +224,8 @@ DFSNumbering getDFSNumbering(BasicBlock *Entry) {
     Numbering.NumToBB.push_back(BB);
 
     Visited.insert(BB);
-    for (const auto& Succ : make_range(succ_begin(BB), succ_end(BB)))
+    auto SuccRange = make_range(succ_begin(BB), succ_end(BB));
+    for (const auto& Succ : reverse(SuccRange))
       if (Visited.count(Succ) == 0) {
         WorkList.push_back(Succ);
         ParentMapping[Succ] = BB;
@@ -242,8 +243,40 @@ DFSNumbering getDFSNumbering(BasicBlock *Entry) {
 struct DomInfo {
   std::vector<Index> IDoms;
   std::vector<Index> SDoms;
+  std::vector<Index> Levels;
 
-  DomInfo(Index n) : IDoms(n), SDoms(n) {}
+  DomInfo(Index n) : IDoms(n), SDoms(n), Levels(n) {}
+
+  void dump(DFSNumbering &Numbering) const {
+    assert(!IDoms.empty());
+    DenseSet<Index> ToPrint;
+    ChildrenTy Children(IDoms.size());
+
+    for (size_t i = 0; i < IDoms.size(); ++i) {
+      ToPrint.insert(static_cast<Index>(i));
+      Children[IDoms[i]].push_back(static_cast<Index>(i));
+    }
+
+    dbgs() << "\nPreorder New Dominator Tree:\n";
+    while (!ToPrint.empty())
+      printNode(*ToPrint.begin(), Numbering, Children, ToPrint);
+  }
+
+private:
+  using ChildrenTy = std::vector<SmallVector<Index, 8>>;
+  void printNode(Index Node, DFSNumbering &Numbering,
+                 const ChildrenTy &Children, DenseSet<Index> &ToPrint) const {
+    ToPrint.erase(Node);
+    for (Index i = 0; i <= Levels[Node]; ++i)
+      dbgs() << "  ";
+
+    dbgs() << '[' << (Levels[Node] + 1) << "] " <<
+              Numbering.NumToBB[Node]->getName() << " {" << Node << "}\n";
+
+    for (const auto& C : Children[Node])
+      if (ToPrint.count(C) != 0)
+        printNode(C, Numbering, Children, ToPrint);
+  }
 };
 
 // Non-recursive union-find-based semidominator path walker.
@@ -320,6 +353,7 @@ DomInfo computeDominators(DFSNumbering Numbering) {
       IDomCandidate = IDoms[IDomCandidate];
 
     IDoms[i] = IDomCandidate;
+    Res.Levels[i] = Res.Levels[IDomCandidate] + 1;
   }
 
   return Res;
@@ -419,6 +453,8 @@ int main(int argc, char **argv) {
   dumpLegacyDomTree(CFG->function);
   if (!verifyNewDomTree(DFSNumbers, Dominators))
     errs() << "\nIncorrect domtree!\n";
+
+  Dominators.dump(DFSNumbers);
 
   addDebugDomInfo(CFG->module, DFSNumbers, Dominators);
   if (ViewCFG)
