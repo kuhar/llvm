@@ -11,6 +11,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -348,6 +349,34 @@ void addDebugDomInfo(Module &M, const DFSNumbering &Numbering,
   }
 }
 
+void dumpLegacyDomTree(Function* F) {
+  DominatorTree DT(*F);
+  DT.print(dbgs());
+}
+
+// FIXME: Verify idoms.
+bool verifyNewDomTree(DFSNumbering Numbering, DomInfo Dominators) {
+  assert(!(Numbering.NumToBB.empty()));
+  assert(Numbering.NumToBB.size() == Dominators.IDoms.size());
+
+  auto *Entry = Numbering.NumToBB[0];
+
+  DominatorTree DT(*Entry->getParent());
+  bool Correct = true;
+
+  for (size_t i = 1; i < Numbering.NumToBB.size(); ++i) {
+    auto *BB = Numbering.NumToBB[i];
+    auto *IDomBB = Numbering.NumToBB[Dominators.IDoms[i]];
+    if (!DT.properlyDominates(IDomBB, BB)) {
+      errs() << "!!\t" << IDomBB->getName() << " doesn't properly dominate  " <<
+                BB->getName() << "\n";
+      Correct = false;
+    }
+  }
+
+  return Correct;
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
@@ -384,6 +413,10 @@ int main(int argc, char **argv) {
     dbgs() << GetName(i) << " (" << i << ")    sdom:\t" << GetName(S) << " (" <<
               S << ")  idom:\t" << GetName(I) << " (" << I << ")\n";
   }
+
+  dumpLegacyDomTree(CFG->function);
+  if (!verifyNewDomTree(DFSNumbers, Dominators))
+    errs() << "\nIncorrect domtree!\n";
 
   addDebugDomInfo(CFG->module, DFSNumbers, Dominators);
   if (ViewCFG)
