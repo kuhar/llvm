@@ -354,7 +354,6 @@ void dumpLegacyDomTree(Function* F) {
   DT.print(dbgs());
 }
 
-// FIXME: Verify idoms.
 bool verifyNewDomTree(DFSNumbering Numbering, DomInfo Dominators) {
   assert(!(Numbering.NumToBB.empty()));
   assert(Numbering.NumToBB.size() == Dominators.IDoms.size());
@@ -367,9 +366,12 @@ bool verifyNewDomTree(DFSNumbering Numbering, DomInfo Dominators) {
   for (size_t i = 1; i < Numbering.NumToBB.size(); ++i) {
     auto *BB = Numbering.NumToBB[i];
     auto *IDomBB = Numbering.NumToBB[Dominators.IDoms[i]];
-    if (!DT.properlyDominates(IDomBB, BB)) {
-      errs() << "!!\t" << IDomBB->getName() << " doesn't properly dominate  " <<
-                BB->getName() << "\n";
+    auto DTN = DT.getNode(BB);
+    auto *CorrectIDom = DTN->getIDom()->getBlock();
+    if (CorrectIDom != IDomBB) {
+      errs() << "!! NewDT:\t" << BB->getName() << " -> " << IDomBB->getName() <<
+                 "\n   OldDT:\t" << BB->getName() << " -> " <<
+             CorrectIDom->getName() << "\n";
       Correct = false;
     }
   }
