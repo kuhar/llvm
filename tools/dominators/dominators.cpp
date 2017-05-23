@@ -7,8 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SparseSet.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Dominators.h"
@@ -28,9 +29,11 @@
 
 #include <cctype>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <sstream>
+#include <queue>
 #include <utility>
 #include <vector>
 
@@ -67,6 +70,8 @@ public:
   Index getLevel(Node N) const;
   Node findNCA(Node First, Node Second) const;
 
+  void insertArc(Node From, Node To);
+
   bool verifyAll() const;
   bool verifyWithOldDT() const;
   bool verifyNCA() const;
@@ -80,11 +85,24 @@ public:
   DenseMap<Node, Index> nodeToNum;
   DenseMap<Index, Node> numToNode;
   DenseMap<Node, Node> parents;
+  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> sdoms;
   DenseMap<Node, Index> levels;
+  std::multimap<Index, Node> bucket;
+  DenseSet<Node> affected;
+  DenseSet<Node> visited;
+  SmallVector<Node, 8> affectedQueue;
+  SmallVector<Node, 8> visitedNotAffectedQueue;
 
   Node getSDomCandidate(Node Start, Node Pred, DenseMap<Node, Node> &Labels);
+
+  void insertReachable(Node From, Node To);
+  void insertUnreachable(Node From, Node To);
+  void visit(Node N, Index RootLevel, Node NCA);
+  void update(Node NCA);
+  void updateLevels();
+
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
   void printImpl(raw_ostream& OS, Node N, const ChildrenTy &Children,
                  std::set<Node, NodeByName> &ToPrint) const;
@@ -107,6 +125,7 @@ void NewDomTree::computeDFSNumbering() {
   std::vector<Node> WorkList;
   WorkList.push_back(root);
 
+  // Compute preorder numbers nad parents.
   while (!WorkList.empty()) {
     BasicBlock *BB = WorkList.back();
     WorkList.pop_back();
@@ -241,6 +260,91 @@ Node NewDomTree::findNCA(Node First, Node Second) const {
   }
 
   return First;
+}
+
+void NewDomTree::insertArc(Node From, Node To) {
+  // Source unreachable. We don't want to maintain a forest, so we ignore
+  // unreachable nodes.
+  if (!contains(From))
+    return;
+
+  // Connecting previously unreachable node.
+  if (!contains(To)) {
+    insertUnreachable(From, To);
+  }
+
+  // Both were reachable.
+  insertReachable(From, To);
+}
+
+void NewDomTree::insertUnreachable(Node From, Node To) {
+
+}
+
+void NewDomTree::insertReachable(Node From, Node To) {
+  const Node NCA = findNCA(From, To);
+  const Node ToIDom = getIDom(To);
+
+  // Nothing affected.
+  if (NCA == To || NCA == ToIDom)
+    return;
+
+  affected.insert(To);
+  const Index ToLevel = getLevel(To);
+  bucket.insert({ToLevel, To});
+
+  auto it = bucket.rbegin();
+  while (it != bucket.rend()) {
+    const Node CurrentNode = it->second;
+    visited.insert(CurrentNode);
+    affectedQueue.push_back(CurrentNode);
+
+    visit(CurrentNode, getLevel(CurrentNode), NCA);
+  }
+
+  update(NCA);
+}
+
+void NewDomTree::visit(Node N, Index RootLevel, Node NCA) {
+  const Index NCALevel = getLevel(NCA);
+
+  for (const auto Succ : successors(N)) {
+    const Index SuccLevel = getLevel(Succ);
+
+    // Succ dominated by subtree root -- not affected.
+    if (SuccLevel > RootLevel) {
+      if (visited.count(Succ) == 0)
+        continue;
+
+      visited.insert(Succ);
+      visitedNotAffectedQueue.push_back(Succ);
+    } else if ((SuccLevel > NCALevel + 1) && affected.count(Succ) == 0) {
+      affected.insert(Succ);
+      bucket.insert({SuccLevel, Succ});
+    }
+  }
+}
+
+void NewDomTree::update(Node NCA) {
+  // Update idoms and start updating levels.
+  for (const Node N : affectedQueue) {
+    idoms[N] = NCA;
+    levels[N] = levels[NCA] + 1;
+  }
+
+  updateLevels();
+
+  affected.clear();
+  visited.clear();
+  affectedQueue.clear();
+  visitedNotAffectedQueue.clear();
+}
+
+void NewDomTree::updateLevels() {
+  // Update levels of visited but not affected nodes;
+  for (const Node N : visitedNotAffectedQueue) {
+    levels[N] = levels[idoms[N]] + 1;
+  }
 }
 
 bool NewDomTree::verifyAll() const {
