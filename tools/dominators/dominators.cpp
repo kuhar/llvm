@@ -62,10 +62,15 @@ public:
   void computeDFSNumbering();
   void computeDominators();
 
-  bool contatins(Node N) const;
+  bool contains(Node N) const;
+  Node getIDom(Node N) const;
+  Index getLevel(Node N) const;
   Node findNCA(Node First, Node Second) const;
 
+  bool verifyAll() const;
   bool verifyWithOldDT() const;
+  bool verifyNCA() const;
+  bool verifyLevels() const;
   void print(raw_ostream& OS) const;
   void dump() const { print(dbgs()); }
 
@@ -114,8 +119,7 @@ void NewDomTree::computeDFSNumbering() {
     ++currentDFSNum;
 
     Visited.insert(BB);
-    auto SuccRange = make_range(succ_begin(BB), succ_end(BB));
-    for (const auto& Succ : reverse(SuccRange))
+    for (const auto& Succ : reverse(successors(BB)))
       if (Visited.count(Succ) == 0) {
         WorkList.push_back(Succ);
         parents[Succ] = BB;
@@ -140,8 +144,7 @@ void NewDomTree::computeDominators() {
   assert(currentDFSNum > 0 && "DFS not run?");
   for (Index i = currentDFSNum - 1; i >= 1; --i) {
     auto CurrentNode = numToNode[i];
-    for (auto PredNode : make_range(pred_begin(CurrentNode),
-                                     pred_end(CurrentNode))) {
+    for (auto PredNode : predecessors(CurrentNode)) {
       assert(nodeToNum.count(PredNode) != 0);
       Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, Label);
       if (nodeToNum[sdoms[CurrentNode]] > nodeToNum[sdoms[SDomCandidate]])
@@ -198,8 +201,22 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
   return Label[Pred];
 }
 
-bool NewDomTree::contatins(Node N) const {
+bool NewDomTree::contains(Node N) const {
   return nodeToNum.find(N) != nodeToNum.end();
+}
+
+Node NewDomTree::getIDom(Node N) const {
+  assert(contains(N));
+  const auto it = idoms.find(N);
+  assert(it != idoms.end());
+  return it->second;
+}
+
+Index NewDomTree::getLevel(Node N) const {
+  assert(contains(N));
+  const auto it = levels.find(N);
+  assert(it != levels.end());
+  return it->second;
 }
 
 Node NewDomTree::findNCA(Node First, Node Second) const {
@@ -226,6 +243,28 @@ Node NewDomTree::findNCA(Node First, Node Second) const {
   return First;
 }
 
+bool NewDomTree::verifyAll() const {
+  bool IsCorrect = true;
+
+  if (!verifyWithOldDT()) {
+    IsCorrect = false;
+    errs() << "\nIncorrect domtree!\n";
+    dumpLegacyDomTree();
+  }
+
+  if (!verifyNCA()) {
+    IsCorrect = false;
+    errs() << "\nIncorrect NCA!\n";
+  }
+
+  if (!verifyLevels()) {
+    IsCorrect = false;
+    errs() << "\nIncorrect levels!\n";
+  }
+
+  return IsCorrect;
+}
+
 bool NewDomTree::verifyWithOldDT() const {
   assert(root);
   assert(!nodeToNum.empty());
@@ -246,6 +285,50 @@ bool NewDomTree::verifyWithOldDT() const {
                 IDom->getName() << "\n   OldDT:\t" << Node->getName() <<
                 " -> " << CorrectIDom->getName() << "\n";
       Correct = false;
+    }
+  }
+
+  return Correct;
+}
+
+bool NewDomTree::verifyNCA() const {
+  Function *F = root->getParent();
+  bool Correct = true;
+  for (auto &BB : *F) {
+    if (!contains(&BB))
+      continue;
+
+    // For every arc U -> V in the graph, NCA(U, V) = idoms[V] or V.
+    for (auto *Succ : successors(&BB)) {
+      // dbgs() << "Checking NCA(" << BB.getName() << ", " << Succ->getName() <<
+      //          ")\n";
+
+      auto NCA = findNCA(&BB, Succ);
+      if (NCA != Succ && NCA != getIDom(Succ)) {
+        Correct = false;
+        dbgs() << "Error:\tNCA(" << BB.getName() << ", " << Succ->getName() <<
+                  ") = " << NCA->getName();
+      }
+    }
+  }
+
+  return Correct;
+}
+
+bool NewDomTree::verifyLevels() const {
+  Function *F = root->getParent();
+  bool Correct = true;
+  for (auto &BB : *F) {
+    if (!contains(&BB) || &BB == root)
+      continue;
+
+    const Index BBL = getLevel(&BB);
+    const auto IDom = getIDom(&BB);
+    const Index IDomL = getLevel(IDom);
+    if (BBL != (IDomL + 1)) {
+      Correct = false;
+      dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", " <<
+             "Level(" << IDom << ") = " << IDomL << "\n";
     }
   }
 
@@ -490,21 +573,10 @@ int main(int argc, char **argv) {
   DT.dumpDFSNumbering();
   DT.computeDominators();
 
-  DT.dumpLegacyDomTree();
-  dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
+  if (!DT.verifyAll()) {
+    errs() << "NewDomTree verification failed.\n";
+  }
   DT.dump();
-
-  if (!DT.verifyWithOldDT())
-    errs() << "\nIncorrect domtree!\n";
-
-
-  /* Test NCA
-  auto First = DT.numToNode[7];
-  auto Second = DT.numToNode[0];
-  auto NCA = DT.findNCA(First, Second);
-  dbgs() << "NCA(" << First->getName() << ", " << Second->getName() << ") = " <<
-            NCA->getName() << "\n";
-  */
 
   if (ViewCFG) {
     DT.addDebugInfoToIR();
