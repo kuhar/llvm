@@ -62,11 +62,14 @@ public:
   void computeDFSNumbering();
   void computeDominators();
 
+  bool contatins(Node N) const;
+  Node findNCA(Node First, Node Second) const;
+
   bool verifyWithOldDT() const;
   void print(raw_ostream& OS) const;
   void dump() const { print(dbgs()); }
 
-private:
+// private: // Public for testing purposes.
   Node root;
   Index currentDFSNum = 0;
   DenseMap<Node, Index> nodeToNum;
@@ -75,7 +78,6 @@ private:
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> sdoms;
   DenseMap<Node, Index> levels;
-  DenseSet<Node> unreachable;
 
   Node getSDomCandidate(Node Start, Node Pred, DenseMap<Node, Node> &Labels);
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
@@ -194,6 +196,34 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
   }
 
   return Label[Pred];
+}
+
+bool NewDomTree::contatins(Node N) const {
+  return nodeToNum.find(N) != nodeToNum.end();
+}
+
+Node NewDomTree::findNCA(Node First, Node Second) const {
+  if (First == root || Second == root)
+    return root;
+
+  while (First != Second) {
+    const auto LFIt = levels.find(First);
+    assert(LFIt != levels.end());
+    const Index LFirst = LFIt->second;
+
+    const auto LSIt = levels.find(Second);
+    assert(LSIt != levels.end());
+    const Index LSecond = LSIt->second;
+
+    if (LFirst < LSecond)
+      std::swap(First, Second);
+
+    const auto it = idoms.find(First);
+    assert(it != idoms.end());
+    First = it->second;
+  }
+
+  return First;
 }
 
 bool NewDomTree::verifyWithOldDT() const {
@@ -466,6 +496,15 @@ int main(int argc, char **argv) {
 
   if (!DT.verifyWithOldDT())
     errs() << "\nIncorrect domtree!\n";
+
+
+  /* Test NCA
+  auto First = DT.numToNode[7];
+  auto Second = DT.numToNode[0];
+  auto NCA = DT.findNCA(First, Second);
+  dbgs() << "NCA(" << First->getName() << ", " << Second->getName() << ") = " <<
+            NCA->getName() << "\n";
+  */
 
   if (ViewCFG) {
     DT.addDebugInfoToIR();
