@@ -62,7 +62,7 @@ public:
   void computeDFSNumbering();
   void computeDominators();
 
-  bool validateWithOldDT() const;
+  bool verifyWithOldDT() const;
   void print(raw_ostream& OS) const;
   void dump() const { print(dbgs()); }
 
@@ -196,7 +196,7 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
   return Label[Pred];
 }
 
-bool NewDomTree::validateWithOldDT() const {
+bool NewDomTree::verifyWithOldDT() const {
   assert(root);
   assert(!nodeToNum.empty());
 
@@ -265,9 +265,9 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
 }
 
 void NewDomTree::dumpDFSNumbering(raw_ostream &OS) const {
-  dbgs() << "\nDFSNumbering:\n";
-  dbgs() << "\tnodeToNum size:\t" << nodeToNum.size() << "\n";
-  dbgs() << "\tparents size:\t" << parents.size() << "\n";
+  OS << "\nDFSNumbering:\n";
+  OS << "\tnodeToNum size:\t" << nodeToNum.size() << "\n";
+  OS << "\tparents size:\t" << parents.size() << "\n";
 
   using KeyValue = std::pair<Node, Index>;
   std::vector<KeyValue> Sorted(nodeToNum.begin(),
@@ -278,7 +278,7 @@ void NewDomTree::dumpDFSNumbering(raw_ostream &OS) const {
   });
 
   for (const auto &NodeToNum : Sorted)
-    dbgs() << NodeToNum.first->getName() << " {" << NodeToNum.second << "}\n";
+    OS << NodeToNum.first->getName() << " {" << NodeToNum.second << "}\n";
 }
 
 void NewDomTree::addDebugInfoToIR() {
@@ -328,15 +328,14 @@ struct InputGraph {
   struct Update { Op action; Arc arc; };
   std::vector<Update> updates;
 
-  void dump() {
-    dbgs() << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\n";
-    dbgs() << "Arcs:\n";
+  void dump(raw_ostream &OS = dbgs()) {
+    OS << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\nArcs:\n";
     for (const auto &A : arcs)
-      dbgs() << A.first << "\t->\t" << A.second << "\n";
-    dbgs() << "Updates:\n";
+      OS << A.first << "\t->\t" << A.second << "\n";
+    OS << "Updates:\n";
     for (const auto &U : updates) {
-      dbgs() << ((U.action == Op::Insert) ? "Ins " : "Del ")
-             << U.arc.first << "\t->\t" << U.arc.second << "\n";
+      OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first <<
+            "\t->\t" << U.arc.second << "\n";
     }
   }
 
@@ -465,7 +464,7 @@ int main(int argc, char **argv) {
   dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
   DT.dump();
 
-  if (!DT.validateWithOldDT())
+  if (!DT.verifyWithOldDT())
     errs() << "\nIncorrect domtree!\n";
 
   if (ViewCFG) {
