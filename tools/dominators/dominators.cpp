@@ -31,6 +31,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <queue>
 #include <string>
 #include <sstream>
 #include <queue>
@@ -89,19 +90,31 @@ public:
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> sdoms;
   DenseMap<Node, Index> levels;
-  std::multimap<Index, Node> bucket;
-  DenseSet<Node> affected;
-  DenseSet<Node> visited;
-  SmallVector<Node, 8> affectedQueue;
-  SmallVector<Node, 8> visitedNotAffectedQueue;
+
+  struct InsertionInfo {
+    using BucketElementTy = std::pair<Index, Node>;
+    struct DecreasingLevel {
+      bool operator()(const BucketElementTy &First,
+                      const BucketElementTy &Second) const {
+        return First.first > Second.first;
+      }
+    };
+
+    std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
+                        DecreasingLevel> bucket;
+    DenseSet<Node> affected;
+    DenseSet<Node> visited;
+    SmallVector<Node, 8> affectedQueue;
+    SmallVector<Node, 8> visitedNotAffectedQueue;
+  };
 
   Node getSDomCandidate(Node Start, Node Pred, DenseMap<Node, Node> &Labels);
 
   void insertReachable(Node From, Node To);
   void insertUnreachable(Node From, Node To);
-  void visit(Node N, Index RootLevel, Node NCA);
-  void update(Node NCA);
-  void updateLevels();
+  void visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
+  void update(Node NCA, InsertionInfo &II);
+  void updateLevels(InsertionInfo &II);
 
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
   void printImpl(raw_ostream& OS, Node N, const ChildrenTy &Children,
@@ -269,12 +282,13 @@ void NewDomTree::insertArc(Node From, Node To) {
     return;
 
   // Connecting previously unreachable node.
-  if (!contains(To)) {
+  if (!contains(To))
     insertUnreachable(From, To);
-  }
+  else // Both were reachable.
+    insertReachable(From, To);
 
-  // Both were reachable.
-  insertReachable(From, To);
+  if (!verifyAll())
+    dbgs() << "Verification after insertion failed!\n";
 }
 
 void NewDomTree::insertUnreachable(Node From, Node To) {
@@ -282,6 +296,7 @@ void NewDomTree::insertUnreachable(Node From, Node To) {
 }
 
 void NewDomTree::insertReachable(Node From, Node To) {
+  InsertionInfo II;
   const Node NCA = findNCA(From, To);
   const Node ToIDom = getIDom(To);
 
@@ -293,28 +308,28 @@ void NewDomTree::insertReachable(Node From, Node To) {
     return;
 
   dbgs() << "Marking " << To->getName() << " affected\n";
-  affected.insert(To);
+  II.affected.insert(To);
   const Index ToLevel = getLevel(To);
   dbgs() << "Putting " << To->getName() << " into bucket\n";
-  bucket.insert({ToLevel, To});
+  II.bucket.push({ToLevel, To});
 
-  auto it = bucket.rbegin(); // FIXME: Sort in reverse order.
-  while (it != bucket.rend()) {
-    const Node CurrentNode = it->second;
+  while (!II.bucket.empty()) {
+    const Node CurrentNode = II.bucket.top().second;
+    II.bucket.pop();
     dbgs() << "\tAdding to visited and AQ: " << CurrentNode->getName() << "\n";
-    visited.insert(CurrentNode);
-    affectedQueue.push_back(CurrentNode);
+    II.visited.insert(CurrentNode);
+    II.affectedQueue.push_back(CurrentNode);
 
-    visit(CurrentNode, getLevel(CurrentNode), NCA);
-    bucket.erase(std::prev(bucket.end()));
-    it = bucket.rend();
+    visit(CurrentNode, getLevel(CurrentNode), NCA, II);
   }
 
   dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName() << "\n";
-  update(NCA);
+  update(NCA, II);
+
+  dbgs() << "Clearing stuff\n";
 }
 
-void NewDomTree::visit(Node N, Index RootLevel, Node NCA) {
+void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
   const Index NCALevel = getLevel(NCA);
   dbgs() << "Visiting " << N->getName() << "\n";
 
@@ -324,26 +339,26 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA) {
     // Succ dominated by subtree root -- not affected.
     if (SuccLevel > RootLevel) {
       dbgs() << "\t\tdominated by subtree root\n";
-      if (visited.count(Succ) != 0)
+      if (II.visited.count(Succ) != 0)
         continue;
 
       dbgs() << "\t\tMarking visited not affected " << Succ->getName() << "\n";
-      visited.insert(Succ);
-      visitedNotAffectedQueue.push_back(Succ);
-      visit(Succ, RootLevel, NCA);
-    } else if ((SuccLevel > NCALevel + 1) && affected.count(Succ) == 0) {
+      II.visited.insert(Succ);
+      II.visitedNotAffectedQueue.push_back(Succ);
+      visit(Succ, RootLevel, NCA, II);
+    } else if ((SuccLevel > NCALevel + 1) && II.affected.count(Succ) == 0) {
       dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName() <<
                 "\n";
-      affected.insert(Succ);
-      bucket.insert({SuccLevel, Succ});
+      II.affected.insert(Succ);
+      II.bucket.push({SuccLevel, Succ});
     }
   }
 }
 
-void NewDomTree::update(Node NCA) {
+void NewDomTree::update(Node NCA, InsertionInfo &II) {
   dbgs() << "Updating NCA = " << NCA->getName() << "\n";
   // Update idoms and start updating levels.
-  for (const Node N : affectedQueue) {
+  for (const Node N : II.affectedQueue) {
     dbgs() << "\tidoms[" << N->getName() << "] = " << NCA->getName() << "\n";
     idoms[N] = NCA;
     dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA] << " + 1\n";
@@ -351,19 +366,13 @@ void NewDomTree::update(Node NCA) {
   }
 
   dbgs() << "Before updating levels\n";
-  updateLevels();
-
-  dbgs() << "Clearing stuff\n";
-  affected.clear();
-  visited.clear();
-  affectedQueue.clear();
-  visitedNotAffectedQueue.clear();
+  updateLevels(II);
 }
 
-void NewDomTree::updateLevels() {
+void NewDomTree::updateLevels(InsertionInfo &II) {
   dbgs() << "Updating levels\n";
   // Update levels of visited but not affected nodes;
-  for (const Node N : visitedNotAffectedQueue) {
+  for (const Node N : II.visitedNotAffectedQueue) {
     dbgs() << "\tlevels[" << N->getName() << "] = levels[" << idoms[N]->getName() <<
               "] + 1\n";
     levels[N] = levels[idoms[N]] + 1;
@@ -549,17 +558,24 @@ struct GraphCFG {
   LLVMContext context;
   Module module;
   Function *function;
+  DenseMap<unsigned, BasicBlock *> numToBB;
 
   GraphCFG(StringRef moduleName = "GraphCFG")
       : module(moduleName, context) {
     FunctionType *FTy = TypeBuilder<void(), false>::get(context);
     function = cast<Function>(module.getOrInsertFunction("dummy_f", FTy));
   }
+
+  std::pair<BasicBlock *, BasicBlock*>
+  getArc(std::pair<unsigned, unsigned> arc) {
+    return {numToBB[arc.first], numToBB[arc.second]};
+  };
 };
 
 struct InputGraph {
   unsigned nodesNum = 0;
   unsigned entry = 0;
+  unsigned updateIdx = 0;
 
   using Arc = std::pair<unsigned, unsigned>;
   std::vector<Arc> arcs;
@@ -568,18 +584,25 @@ struct InputGraph {
   struct Update { Op action; Arc arc; };
   std::vector<Update> updates;
 
+  std::unique_ptr<GraphCFG> cfg;
+
   void dump(raw_ostream &OS = dbgs()) {
     OS << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\nArcs:\n";
     for (const auto &A : arcs)
       OS << A.first << "\t->\t" << A.second << "\n";
+
     OS << "Updates:\n";
-    for (const auto &U : updates) {
+    for (const auto &U : updates)
       OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first <<
             "\t->\t" << U.arc.second << "\n";
-    }
   }
 
-  std::unique_ptr<GraphCFG> toCFG() const;
+  // Returns entry/root;
+  BasicBlock * toCFG();
+
+  using CFGArc = std::pair<BasicBlock *, BasicBlock *>;
+  struct CFGUpdate { Op action; CFGArc arc; };
+  Optional<CFGUpdate> applyUpdate();
 };
 
 InputGraph readInputGraph(std::string path) {
@@ -632,53 +655,6 @@ InputGraph readInputGraph(std::string path) {
   return Graph;
 }
 
-std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
-  std::unique_ptr<GraphCFG> CFGPtr = make_unique<GraphCFG>();
-  GraphCFG &CFG = *CFGPtr;
-  BasicBlock* EntryBB = nullptr;
-  std::vector<BasicBlock *> Blocks(nodesNum);
-  std::vector<SmallVector<BasicBlock *, 4>> Children(nodesNum);
-
-  auto MakeBB = [&] (StringRef name) -> BasicBlock * {
-    return BasicBlock::Create(CFG.context, name, CFG.function);
-  };
-
-  auto MakeName = [](StringRef prefix, unsigned num) {
-    std::string buffer;
-    raw_string_ostream OS(buffer);
-    OS << prefix << num;
-    OS.flush();
-    return OS.str();
-  };
-
-  EntryBB = Blocks[entry - 1] = MakeBB(MakeName("entry_n_", entry));
-  for (unsigned i = 1; i <= nodesNum; ++i)
-    if (i != entry)
-      Blocks[i - 1] = MakeBB(MakeName("n_", i));
-
-  for (const auto &A : arcs)
-    Children[A.first - 1].push_back(Blocks[A.second - 1]);
-
-  auto *IntTy = IntegerType::get(CFG.context, 32);
-  auto *Zero = ConstantInt::get(IntTy, 0);
-  IRBuilder<> IRB(EntryBB);
-  for (size_t i = 0; i < Children.size(); ++i) {
-    const auto ChildrenNum = Children[i].size();
-    if (ChildrenNum == 0)
-      continue;
-
-    auto *SrcBB = Blocks[i];
-    IRB.SetInsertPoint(SrcBB);
-    auto *Switch = IRB.CreateSwitch(Zero, Children[i].front());
-    for (size_t c = 1; c < ChildrenNum; ++c) {
-      auto *CaseInt = ConstantInt::get(IntTy, c);
-      Switch->addCase(CaseInt, Children[i][c]);
-    }
-  }
-
-  return CFGPtr;
-}
-
 static void connect(BasicBlock *From, BasicBlock *To) {
   auto *IntTy = IntegerType::get(From->getParent()->getParent()->getContext(),
                                  32);
@@ -695,6 +671,54 @@ static void connect(BasicBlock *From, BasicBlock *To) {
   SI->addCase(IntVal, To);
 }
 
+BasicBlock *InputGraph::toCFG() {
+  cfg = make_unique<GraphCFG>();
+  GraphCFG &CFG = *cfg;
+  BasicBlock* EntryBB = nullptr;
+  std::vector<BasicBlock *> Blocks(nodesNum);
+
+  auto MakeBB = [&] (StringRef name) -> BasicBlock * {
+    return BasicBlock::Create(CFG.context, name, CFG.function);
+  };
+
+  auto MakeName = [](StringRef prefix, unsigned num) {
+    std::string buffer;
+    raw_string_ostream OS(buffer);
+    OS << prefix << num;
+    OS.flush();
+    return OS.str();
+  };
+
+  EntryBB = Blocks[entry - 1] = MakeBB(MakeName("entry_n_", entry));
+  CFG.numToBB[entry] = EntryBB;
+
+  for (unsigned i = 1; i <= nodesNum; ++i)
+    if (i != entry) {
+      Blocks[i - 1] = MakeBB(MakeName("n_", i));
+      CFG.numToBB[i] = Blocks[i - 1];
+    }
+
+  for (const auto &A : arcs)
+    connect(Blocks[A.first - 1], Blocks[A.second - 1]);
+
+  return EntryBB;
+}
+
+Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate() {
+  if (updateIdx == updates.size())
+    return None;
+
+  auto Next = updates[updateIdx++];
+  if (Next.action == InputGraph::Op::Insert) {
+    auto A = cfg->getArc(Next.arc);
+    connect(A.first, A.second);
+
+    return CFGUpdate{Next.action, A};
+  }
+
+  llvm_unreachable("Not implemented");
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
@@ -707,32 +731,29 @@ int main(int argc, char **argv) {
 
   auto Graph = readInputGraph(InputFile);
   Graph.dump();
-  auto CFG = Graph.toCFG();
+  auto *RootBB = Graph.toCFG();
 
   dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 
-  NewDomTree DT(&CFG->function->getEntryBlock());
+  NewDomTree DT(RootBB);
   DT.computeDFSNumbering();
   DT.dumpDFSNumbering();
   DT.computeDominators();
 
-  if (!DT.verifyAll()) {
+  if (!DT.verifyAll())
     errs() << "NewDomTree verification failed.\n";
-  }
+
   DT.dump();
 
-  auto DebugConnect = [&] (Index From, Index To) {
-    auto F = DT.numToNode[From];
-    auto S = DT.numToNode[To];
-    connect(F, S);
-    DT.insertArc(F, S);
-    DT.dump();
-  };
+  Optional<InputGraph::CFGUpdate> Update;
+  while ((Update = Graph.applyUpdate())) {
+    if (Update->action == InputGraph::Op::Insert)
+      DT.insertArc(Update->arc.first, Update->arc.second);
+    else
+      llvm_unreachable("Not implemented");
 
-  // DebugConnect(1, 3);
-  // DebugConnect(11, 9);
-  // DebugConnect(9, 8);
-  // DebugConnect(6, 5);
+    DT.dump();
+  }
 
   if (ViewCFG) {
     DT.addDebugInfoToIR();
