@@ -48,6 +48,7 @@ static cl::opt<bool>
 
 using Node = BasicBlock *;
 using Index = unsigned;
+static constexpr Index UndefIndex = static_cast<Index>(-1);
 
 struct NodeByName {
   bool operator() (const Node first, const Node second) const {
@@ -59,11 +60,56 @@ struct NodeByName {
   }
 };
 
+struct DFSResult {
+  Index nextDFSNum = 0;
+  DenseMap<Node, Index> nodeToNum;
+  DenseMap<Index, Node> numToNode;
+  DenseMap<Node, Node> DFSParent;
+};
+
+inline bool DescendAlways(Node) {
+  return true;
+}
+
+template<typename VisitAction, typename DescendCondition>
+DFSResult runDFS(Node Start, VisitAction Action,
+                 DescendCondition Condition) {
+  DFSResult Res;
+  DenseSet<Node> Visited;
+  std::vector<Node> WorkList;
+
+  Res.DFSParent[Start] = nullptr;
+  WorkList.push_back(Start);
+
+  // Compute preorder numbers nad parents.
+  while (!WorkList.empty()) {
+    BasicBlock *BB = WorkList.back();
+    WorkList.pop_back();
+    if (Visited.count(BB) != 0)
+      continue;
+
+    Res.nodeToNum[BB] = Res.nextDFSNum;
+    Res.numToNode[Res.nextDFSNum] = BB;
+    ++Res.nextDFSNum;
+    Visited.insert(BB);
+
+    Action(BB, static_cast<const DFSResult&>(Res));
+
+    for (auto *Succ : reverse(successors(BB)))
+      if (Visited.count(Succ) == 0)
+        if (Condition(Succ)) {
+          WorkList.push_back(Succ);
+          Res.DFSParent[Succ] = BB;
+        }
+  }
+
+  return Res;
+}
+
 class NewDomTree {
 public:
   NewDomTree(Node root) : root(root) {}
 
-  void computeDFSNumbering();
   void computeDominators();
 
   bool contains(Node N) const;
@@ -110,8 +156,9 @@ public:
 
   Node getSDomCandidate(Node Start, Node Pred, DenseMap<Node, Node> &Labels);
 
-  void insertReachable(Node From, Node To);
   void insertUnreachable(Node From, Node To);
+  void addUnreachable(Node N);
+  void insertReachable(Node From, Node To);
   void visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
   void update(Node NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
@@ -130,36 +177,13 @@ public:
   }
 };
 
-void NewDomTree::computeDFSNumbering() {
-  currentDFSNum = 0;
-  parents[root] = root;
-
-  DenseSet<Node> Visited;
-  std::vector<Node> WorkList;
-  WorkList.push_back(root);
-
-  // Compute preorder numbers nad parents.
-  while (!WorkList.empty()) {
-    BasicBlock *BB = WorkList.back();
-    WorkList.pop_back();
-    if (Visited.count(BB) != 0)
-      continue;
-
-
-    nodeToNum[BB] = currentDFSNum;
-    numToNode[currentDFSNum] = BB;
-    ++currentDFSNum;
-
-    Visited.insert(BB);
-    for (const auto& Succ : reverse(successors(BB)))
-      if (Visited.count(Succ) == 0) {
-        WorkList.push_back(Succ);
-        parents[Succ] = BB;
-      }
-  }
-}
-
 void NewDomTree::computeDominators() {
+  auto DFSRes = runDFS(root, [](Node, const DFSResult&) {}, DescendAlways);
+  currentDFSNum = DFSRes.nextDFSNum;
+  nodeToNum = std::move(DFSRes.nodeToNum);
+  numToNode = std::move(DFSRes.numToNode);
+  parents = std::move(DFSRes.DFSParent);
+
   DenseMap<Node, Node> Label;
 
   // Step 0: initialize data structures.
@@ -292,6 +316,22 @@ void NewDomTree::insertArc(Node From, Node To) {
 }
 
 void NewDomTree::insertUnreachable(Node From, Node To) {
+  assert(!contains(To));
+  dbgs() << "Inserting " << From->getName() << " -> (unreachable) " <<
+            To->getName() << "\n";
+  dbgs() << "\tidoms[" << To->getName() << "] = " << From->getName() << "\n";
+  idoms[To] = From;
+  dbgs() << "\tlevels[" << To->getName() << "] = " << levels[From] << "] + 1\n";
+  levels[To] = levels[From] + 1;
+
+  addUnreachable(To);
+}
+
+void NewDomTree::addUnreachable(Node N) {
+  dbgs() << "Adding unreachable " << N->getName() << "\n";
+  SmallVector<std::pair<Node, Node>, 8> connectingArcs;
+
+  dbgs() << "Run semi-nca starting from " << N->getName() << "\n";
 
 }
 
@@ -736,9 +776,9 @@ int main(int argc, char **argv) {
   dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 
   NewDomTree DT(RootBB);
-  DT.computeDFSNumbering();
   DT.dumpDFSNumbering();
   DT.computeDominators();
+  DT.dumpDFSNumbering();
 
   if (!DT.verifyAll())
     errs() << "NewDomTree verification failed.\n";
