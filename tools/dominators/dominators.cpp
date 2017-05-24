@@ -285,40 +285,55 @@ void NewDomTree::insertReachable(Node From, Node To) {
   const Node NCA = findNCA(From, To);
   const Node ToIDom = getIDom(To);
 
+  dbgs() << "Inserting a reachable arc: " << From->getName() << " -> " <<
+            To->getName() << "\n";
+
   // Nothing affected.
   if (NCA == To || NCA == ToIDom)
     return;
 
+  dbgs() << "Marking " << To->getName() << " affected\n";
   affected.insert(To);
   const Index ToLevel = getLevel(To);
+  dbgs() << "Putting " << To->getName() << " into bucket\n";
   bucket.insert({ToLevel, To});
 
-  auto it = bucket.rbegin();
+  auto it = bucket.rbegin(); // FIXME: Sort in reverse order.
   while (it != bucket.rend()) {
     const Node CurrentNode = it->second;
+    dbgs() << "\tAdding to visited and AQ: " << CurrentNode->getName() << "\n";
     visited.insert(CurrentNode);
     affectedQueue.push_back(CurrentNode);
 
     visit(CurrentNode, getLevel(CurrentNode), NCA);
+    bucket.erase(std::prev(bucket.end()));
+    it = bucket.rend();
   }
 
+  dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName() << "\n";
   update(NCA);
 }
 
 void NewDomTree::visit(Node N, Index RootLevel, Node NCA) {
   const Index NCALevel = getLevel(NCA);
+  dbgs() << "Visiting " << N->getName() << "\n";
 
   for (const auto Succ : successors(N)) {
     const Index SuccLevel = getLevel(Succ);
-
+    dbgs() << "\tSuccessor " << Succ->getName() << ", level = " << SuccLevel << "\n";
     // Succ dominated by subtree root -- not affected.
     if (SuccLevel > RootLevel) {
-      if (visited.count(Succ) == 0)
+      dbgs() << "\t\tdominated by subtree root\n";
+      if (visited.count(Succ) != 0)
         continue;
 
+      dbgs() << "\t\tMarking visited not affected " << Succ->getName() << "\n";
       visited.insert(Succ);
       visitedNotAffectedQueue.push_back(Succ);
+      visit(Succ, RootLevel, NCA);
     } else if ((SuccLevel > NCALevel + 1) && affected.count(Succ) == 0) {
+      dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName() <<
+                "\n";
       affected.insert(Succ);
       bucket.insert({SuccLevel, Succ});
     }
@@ -326,14 +341,19 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA) {
 }
 
 void NewDomTree::update(Node NCA) {
+  dbgs() << "Updating NCA = " << NCA->getName() << "\n";
   // Update idoms and start updating levels.
   for (const Node N : affectedQueue) {
+    dbgs() << "\tidoms[" << N->getName() << "] = " << NCA->getName() << "\n";
     idoms[N] = NCA;
+    dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA] << " + 1\n";
     levels[N] = levels[NCA] + 1;
   }
 
+  dbgs() << "Before updating levels\n";
   updateLevels();
 
+  dbgs() << "Clearing stuff\n";
   affected.clear();
   visited.clear();
   affectedQueue.clear();
@@ -341,8 +361,11 @@ void NewDomTree::update(Node NCA) {
 }
 
 void NewDomTree::updateLevels() {
+  dbgs() << "Updating levels\n";
   // Update levels of visited but not affected nodes;
   for (const Node N : visitedNotAffectedQueue) {
+    dbgs() << "\tlevels[" << N->getName() << "] = levels[" << idoms[N]->getName() <<
+              "] + 1\n";
     levels[N] = levels[idoms[N]] + 1;
   }
 }
@@ -656,6 +679,22 @@ std::unique_ptr<GraphCFG> InputGraph::toCFG() const {
   return CFGPtr;
 }
 
+static void connect(BasicBlock *From, BasicBlock *To) {
+  auto *IntTy = IntegerType::get(From->getParent()->getParent()->getContext(),
+                                 32);
+  if (!From->getTerminator()) {
+    IRBuilder<> IRB(From);
+    IRB.CreateSwitch(ConstantInt::get(IntTy, 0), To);
+    return;
+  }
+
+  SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
+  const auto Last = SI->getNumCases();
+
+  auto *IntVal = ConstantInt::get(IntTy, Last);
+  SI->addCase(IntVal, To);
+}
+
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
@@ -681,6 +720,19 @@ int main(int argc, char **argv) {
     errs() << "NewDomTree verification failed.\n";
   }
   DT.dump();
+
+  auto DebugConnect = [&] (Index From, Index To) {
+    auto F = DT.numToNode[From];
+    auto S = DT.numToNode[To];
+    connect(F, S);
+    DT.insertArc(F, S);
+    DT.dump();
+  };
+
+  // DebugConnect(1, 3);
+  // DebugConnect(11, 9);
+  // DebugConnect(9, 8);
+  // DebugConnect(6, 5);
 
   if (ViewCFG) {
     DT.addDebugInfoToIR();
