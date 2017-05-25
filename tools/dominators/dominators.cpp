@@ -32,7 +32,6 @@
 #include <map>
 #include <memory>
 #include <queue>
-#include <queue>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -62,6 +61,38 @@ class NewDomTree {
 public:
   NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
 
+  bool contains(Node N) const;
+  Node getIDom(Node N) const;
+  Index getLevel(Node N) const;
+  Node findNCA(Node First, Node Second) const;
+
+  void insertArc(Node From, Node To);
+  void deleteArc(Node From, Node To);
+
+  bool verifyAll() const;
+  bool verifyWithOldDT() const;
+  bool verifyNCA() const;
+  bool verifyLevels() const;
+
+  void print(raw_ostream &OS) const;
+  void dump() const { print(dbgs()); }
+  void dumpLevels(raw_ostream &OS = dbgs()) const;
+  void addDebugInfoToIR();
+  void viewCFG() const { root->getParent()->viewCFG(); }
+  void dumpLegacyDomTree(raw_ostream &OS = dbgs()) const {
+    DominatorTree DT(*root->getParent());
+    DT.print(OS);
+  }
+
+private:
+  Node root;
+  DenseMap<Node, Node> idoms;
+  DenseMap<Node, Node> sdoms;
+  DenseMap<Node, Index> levels;
+  DenseMap<Node, Node> preorderParents;
+  DenseMap<Node, Node> sdomPathPredecessors;
+  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
+
   void computeReachableDominators(Node Root, Index MinLevel);
   void computeUnreachableDominators(
       Node Root, Node Incoming,
@@ -80,27 +111,6 @@ public:
   static DFSResult runDFS(Node Start, DescendCondition Condition);
 
   void semiNCA(DFSResult &DFS, Node Root, Index MinLevel, Index RootLevel = 0);
-
-  bool contains(Node N) const;
-  Node getIDom(Node N) const;
-  Index getLevel(Node N) const;
-  Node findNCA(Node First, Node Second) const;
-
-  void insertArc(Node From, Node To);
-
-  bool verifyAll() const;
-  bool verifyWithOldDT() const;
-  bool verifyNCA() const;
-  bool verifyLevels() const;
-  void print(raw_ostream &OS) const;
-  void dump() const { print(dbgs()); }
-
-  // private: // Public for testing purposes.
-  Node root;
-  DenseMap<Node, Node> idoms;
-  DenseMap<Node, Node> sdoms;
-  DenseMap<Node, Index> levels;
-  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
 
   struct InsertionInfo {
     using BucketElementTy = std::pair<Index, Node>;
@@ -125,22 +135,17 @@ public:
 
   void insertUnreachable(Node From, Node To);
   void insertReachable(Node From, Node To);
-  void visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
-  void update(Node NCA, InsertionInfo &II);
+  void visitInsertion(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
+  void updateInsertion(Node NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
+
+  bool isReachableFromIDom(Node N);
+  void deleteReachable(Node From, Node To);
+  void deleteUnreachable(Node From, Node To);
 
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
   void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
                  std::set<Node, NodeByName> &ToPrint) const;
-
-public:
-  void dumpLevels(raw_ostream &OS = dbgs()) const;
-  void addDebugInfoToIR();
-  void viewCFG() const { root->getParent()->viewCFG(); }
-  void dumpLegacyDomTree(raw_ostream &OS = dbgs()) const {
-    DominatorTree DT(*root->getParent());
-    DT.print(OS);
-  }
 };
 
 template <typename DescendCondition>
@@ -195,6 +200,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
     Label[N] = N;
   }
 
+  idoms[Root] = Root;
   levels[Root] = RootLevel;
 
   // Step 1: compute semidominators.
@@ -210,8 +216,10 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
 
       Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, DFS, Label);
       if (DFS.nodeToNum[sdoms[CurrentNode]] >
-          DFS.nodeToNum[sdoms[SDomCandidate]])
+          DFS.nodeToNum[sdoms[SDomCandidate]]) {
         sdoms[CurrentNode] = sdoms[SDomCandidate];
+        sdomPathPredecessors[CurrentNode] = SDomCandidate;
+      }
     }
     // Update Label for the current Node.
     Label[CurrentNode] = sdoms[CurrentNode];
@@ -272,6 +280,7 @@ void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
   };
 
   auto DFSRes = runDFS(root, LevelDescender);
+  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
   DFSRes.dumpDFSNumbering();
 
   semiNCA(DFSRes, Root, MinLevel);
@@ -294,6 +303,7 @@ void NewDomTree::computeUnreachableDominators(
   };
 
   auto DFSRes = runDFS(Root, UnreachableDescender);
+  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
   DFSRes.dumpDFSNumbering();
 
   semiNCA(DFSRes, Root, /* MinLevel = */ 0, levels[Incoming] + 1);
@@ -399,17 +409,18 @@ void NewDomTree::insertReachable(Node From, Node To) {
     II.visited.insert(CurrentNode);
     II.affectedQueue.push_back(CurrentNode);
 
-    visit(CurrentNode, getLevel(CurrentNode), NCA, II);
+    visitInsertion(CurrentNode, getLevel(CurrentNode), NCA, II);
   }
 
   dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName()
          << "\n";
-  update(NCA, II);
+  updateInsertion(NCA, II);
 
   dbgs() << "Clearing stuff\n";
 }
 
-void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
+void NewDomTree::visitInsertion(Node N, Index RootLevel, Node NCA,
+                                InsertionInfo &II) {
   const Index NCALevel = getLevel(NCA);
   dbgs() << "Visiting " << N->getName() << "\n";
 
@@ -426,7 +437,7 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
       dbgs() << "\t\tMarking visited not affected " << Succ->getName() << "\n";
       II.visited.insert(Succ);
       II.visitedNotAffectedQueue.push_back(Succ);
-      visit(Succ, RootLevel, NCA, II);
+      visitInsertion(Succ, RootLevel, NCA, II);
     } else if ((SuccLevel > NCALevel + 1) && II.affected.count(Succ) == 0) {
       dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName()
              << "\n";
@@ -436,7 +447,7 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
   }
 }
 
-void NewDomTree::update(Node NCA, InsertionInfo &II) {
+void NewDomTree::updateInsertion(Node NCA, InsertionInfo &II) {
   dbgs() << "Updating NCA = " << NCA->getName() << "\n";
   // Update idoms and start updating levels.
   for (const Node N : II.affectedQueue) {
@@ -444,6 +455,9 @@ void NewDomTree::update(Node NCA, InsertionInfo &II) {
     idoms[N] = NCA;
     dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA] << " + 1\n";
     levels[N] = levels[NCA] + 1;
+
+    assert(preorderParents.count(N) != 0);
+    preorderParents.erase(N);
   }
 
   dbgs() << "Before updating levels\n";
@@ -458,6 +472,85 @@ void NewDomTree::updateLevels(InsertionInfo &II) {
            << idoms[N]->getName() << "] + 1\n";
     levels[N] = levels[idoms[N]] + 1;
   }
+}
+
+void NewDomTree::deleteArc(Node From, Node To) {
+  dbgs() << "Deleting arc " << From->getName() << " -> " << To->getName()
+         << "\n";
+  // Deletion in unreachable subtree -- nothing to do.
+  if (!contains(From))
+    return;
+
+  const auto NCA = findNCA(From, To);
+
+  // To dominates From -- nothing to do.
+  if (To == NCA)
+    return;
+
+  const Node IDomTo = getIDom(To);
+
+  // To stays reachable.
+  if (From != IDomTo || isReachableFromIDom(To))
+    deleteReachable(From, To);
+  else
+    deleteUnreachable(From, To);
+
+  if (!verifyAll())
+    dbgs() << "Verification after deletion failed!\n";
+}
+
+bool NewDomTree::isReachableFromIDom(Node N) {
+  for (auto *Succ : predecessors(N)) {
+    // Incoming arc from an unreachable Node.
+    if (!contains(Succ))
+      continue;
+
+    const Node Support = findNCA(N, Succ);
+    if (Support != N) {
+      dbgs() << "\tIsReachable " << N->getName() << " from support = "
+             << Succ->getName() << "\n";
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void NewDomTree::deleteReachable(Node From, Node To) {
+  auto parentIt = preorderParents.find(To);
+  if (parentIt != preorderParents.end() && From != parentIt->second) {
+    // What happens when why try to delete an arc that first connected
+    // unreachable region? SNCA doesn't assign an spath to it.
+    assert(sdomPathPredecessors.count(To) != 0);
+    if (sdomPathPredecessors[To] != From)
+      return;
+  }
+
+  dbgs() << "Subtree needs to be rebuilt\n";
+  const Node IDomTo = getIDom(To);
+  const Node PrevIDomSubTree = getIDom(IDomTo);
+  const Index Level = getLevel(IDomTo);
+  auto DescendBelow = [Level, this](Node From, Node To) {
+    return getLevel(To) > Level;
+  };
+
+  dbgs() << "Top of subtree: " << IDomTo->getName() << " [" << Level << "]\n";
+
+  auto DFSRes = runDFS(IDomTo, DescendBelow);
+  DFSRes.dumpDFSNumbering();
+  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
+
+  dbgs() << "Running SNCA\n";
+  semiNCA(DFSRes, IDomTo, Level, Level);
+  // Reattach.
+  idoms[IDomTo] = PrevIDomSubTree;
+  sdoms[IDomTo] = PrevIDomSubTree;
+  dbgs() << "Reattaching:\n" << "idoms[" << IDomTo->getName() << "] = "
+         << PrevIDomSubTree->getName() << "\nDeleted\n";
+}
+
+void NewDomTree::deleteUnreachable(Node From, Node To) {
+  llvm_unreachable("Not implemented");
 }
 
 bool NewDomTree::verifyAll() const {
@@ -619,9 +712,6 @@ void NewDomTree::addDebugInfoToIR() {
   auto *IntTy = IntegerType::get(M->getContext(), 1);
 
   for (const auto &NodeToIDom : idoms) {
-    if (!NodeToIDom.second)
-      continue;
-
     auto BB = NodeToIDom.first;
     auto SD = sdoms[BB];
     auto ID = NodeToIDom.second;
@@ -765,6 +855,16 @@ static void connect(BasicBlock *From, BasicBlock *To) {
   SI->addCase(IntVal, To);
 }
 
+static void disconnect(BasicBlock *From, BasicBlock *To) {
+  SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
+  assert(SI);
+  for (auto CIt = SI->case_begin(); CIt != SI->case_end(); ++CIt)
+    if (CIt->getCaseSuccessor() == To) {
+      SI->removeCase(CIt);
+      return;
+    }
+}
+
 BasicBlock *InputGraph::toCFG() {
   cfg = make_unique<GraphCFG>();
   GraphCFG &CFG = *cfg;
@@ -803,14 +903,13 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate() {
     return None;
 
   auto Next = updates[updateIdx++];
-  if (Next.action == InputGraph::Op::Insert) {
-    auto A = cfg->getArc(Next.arc);
+  auto A = cfg->getArc(Next.arc);
+  if (Next.action == InputGraph::Op::Insert)
     connect(A.first, A.second);
+  else
+    disconnect(A.first, A.second);
 
-    return CFGUpdate{Next.action, A};
-  }
-
-  llvm_unreachable("Not implemented");
+  return CFGUpdate{Next.action, A};
 }
 
 int main(int argc, char **argv) {
@@ -845,7 +944,7 @@ int main(int argc, char **argv) {
     if (Update->action == InputGraph::Op::Insert)
       DT.insertArc(Update->arc.first, Update->arc.second);
     else
-      llvm_unreachable("Not implemented");
+      DT.deleteArc(Update->arc.first, Update->arc.second);
 
     DT.dump();
   }
