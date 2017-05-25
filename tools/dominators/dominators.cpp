@@ -52,7 +52,7 @@ static constexpr Index UndefIndex = static_cast<Index>(-1);
 
 struct NodeByName {
   bool operator() (const Node first, const Node second) const {
-    const auto Cmp = first->getName().compare(second->getName());
+    const auto Cmp = first->getName().compare_numeric(second->getName());
     if (Cmp == 0)
       return less{}(first, second);
 
@@ -67,7 +67,20 @@ public:
   void computeReachableDominators(Node Root, Index MinLevel);
   void computeUnreachableDominators(Node Root, Node Incoming,
          SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
-  void semiNCA(Node Root, const Index MinLevel);
+
+  struct DFSResult {
+    Index nextDFSNum = 0;
+    DenseMap<Node, Index> nodeToNum;
+    DenseMap<Index, Node> numToNode;
+    DenseMap<Node, Node> parent;
+
+    void dumpDFSNumbering(raw_ostream& OS = dbgs()) const;
+  };
+
+  template<typename DescendCondition>
+  static DFSResult runDFS(Node Start, DescendCondition Condition);
+
+  void semiNCA(DFSResult &DFS, Node Root, Index MinLevel, Index RootLevel = 0);
 
   bool contains(Node N) const;
   Node getIDom(Node N) const;
@@ -85,14 +98,10 @@ public:
 
 // private: // Public for testing purposes.
   Node root;
-  Index currentDFSNum = 0;
-  DenseMap<Node, Index> nodeToNum; // FIXME: Extract to Semi-NCA.
-  DenseMap<Index, Node> numToNode; // FIXME: Extract to Semi-NCA.
-  DenseMap<Node, Node> parents;    // FIXME: Extract to Semi-NCA???
-  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> sdoms;
   DenseMap<Node, Index> levels;
+  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
 
   struct InsertionInfo {
     using BucketElementTy = std::pair<Index, Node>;
@@ -111,7 +120,8 @@ public:
     SmallVector<Node, 8> visitedNotAffectedQueue;
   };
 
-  Node getSDomCandidate(Node Start, Node Pred, DenseMap<Node, Node> &Labels);
+  Node getSDomCandidate(Node Start, Node Pred, DFSResult &DFS,
+                        DenseMap<Node, Node> &Labels);
 
   void insertUnreachable(Node From, Node To);
   void insertReachable(Node From, Node To);
@@ -124,7 +134,7 @@ public:
                  std::set<Node, NodeByName> &ToPrint) const;
 
 public:
-  void dumpDFSNumbering(raw_ostream& OS = dbgs()) const;
+  void dumpLevels(raw_ostream &OS = dbgs()) const;
   void addDebugInfoToIR();
   void viewCFG() const { root->getParent()->viewCFG(); }
   void dumpLegacyDomTree(raw_ostream &OS = dbgs()) const {
@@ -133,21 +143,15 @@ public:
   }
 };
 
-struct DFSResult {
-  Index nextDFSNum = 0;
-  DenseMap<Node, Index> nodeToNum;
-  DenseMap<Index, Node> numToNode;
-  DenseMap<Node, Node> DFSParent;
-};
-
 template<typename DescendCondition>
-DFSResult runDFS(Node Start, const Index StartNum, DescendCondition Condition) {
+NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
+                                         DescendCondition Condition) {
   DFSResult Res;
-  Res.nextDFSNum = StartNum;
+  Res.nextDFSNum = 0;
   DenseSet<Node> Visited;
   std::vector<Node> WorkList;
 
-  Res.DFSParent[Start] = nullptr;
+  Res.parent[Start] = nullptr;
   WorkList.push_back(Start);
 
   // Compute preorder numbers nad parents.
@@ -166,11 +170,98 @@ DFSResult runDFS(Node Start, const Index StartNum, DescendCondition Condition) {
       if (Visited.count(Succ) == 0)
         if (Condition(BB, Succ)) {
           WorkList.push_back(Succ);
-          Res.DFSParent[Succ] = BB;
+          Res.parent[Succ] = BB;
         }
   }
 
   return Res;
+}
+
+void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
+                         const Index RootLevel /* = 0 */) {
+  assert(DFS.nodeToNum.count(Root) != 0);
+  assert(DFS.nextDFSNum > 0 && "DFS not run?");
+  DenseMap<Node, Node> Label;
+  const Index LastNum = DFS.nextDFSNum - 1;
+  dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n";
+  dbgs() << "LastNum: " << LastNum << ": " <<
+         DFS.numToNode[LastNum]->getName() << "\n";
+
+  // Step 0: initialize data structures.
+  for (Index i = 0; i <= LastNum; ++i) {
+    auto N = DFS.numToNode[i];
+    idoms[N] = DFS.parent[N];
+    sdoms[N] = N;
+    Label[N] = N;
+  }
+
+  levels[Root] = RootLevel;
+
+  // Step 1: compute semidominators.
+  for (Index i = LastNum; i > 0; --i) {
+    auto CurrentNode = DFS.numToNode[i];
+    for (auto PredNode : predecessors(CurrentNode)) {
+      // Incoming arc from an unreachable node.
+      if (DFS.nodeToNum.count(PredNode) == 0)
+        continue;
+
+      if (levels[PredNode] < MinLevel)
+        continue;
+
+      Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, DFS, Label);
+      if (DFS.nodeToNum[sdoms[CurrentNode]] >
+          DFS.nodeToNum[sdoms[SDomCandidate]])
+        sdoms[CurrentNode] = sdoms[SDomCandidate];
+    }
+    // Update Label for the current Node.
+    Label[CurrentNode] = sdoms[CurrentNode];
+  }
+
+  // Step 3: compute immediate dominators as
+  //   IDoms[i] = NCA(SDoms[i], SpanningTreeParent(i)).
+  // Note that IDoms were initialized to tree parents, so we don't need the
+  // original Parents array.
+  for (Index i = 1; i <= LastNum; ++i) {
+    const auto CurrentNode = DFS.numToNode[i];
+    const auto SDom = sdoms[CurrentNode];
+    auto IDomCandidate = idoms[CurrentNode];
+    while (DFS.nodeToNum[IDomCandidate] > DFS.nodeToNum[SDom])
+      IDomCandidate = idoms[IDomCandidate];
+
+    idoms[CurrentNode] = IDomCandidate;
+    levels[CurrentNode] = levels[IDomCandidate] + 1;
+  }
+}
+
+// Non-recursive union-find-based semidominator path walker.
+Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
+                                  DFSResult &DFS, DenseMap<Node, Node> &Label) {
+  assert(Pred != Start && "Not a predecessor");
+  const Index StartNum = DFS.nodeToNum[Start];
+  const Index PredNum = DFS.nodeToNum[Pred];
+
+  if (PredNum < StartNum)
+    return Pred;
+
+  Node Next = Pred;
+  SmallVector<Node, 8> SDomPath;
+  // Walk the SDom path up the spanning tree.
+  do {
+    SDomPath.push_back(Next);
+    Next = DFS.parent[Next];
+  } while (DFS.nodeToNum[Next] > StartNum);
+
+  // Compress path.
+  for (auto i = SDomPath.size() - 2; i < SDomPath.size(); --i) {
+    const auto Current = SDomPath[i];
+    const auto Parent = SDomPath[i + 1];
+
+    if (DFS.nodeToNum[Label[Current]] > DFS.nodeToNum[Label[Parent]])
+      Label[Current] = Label[Parent];
+    DFS.parent[Current] = DFS.parent[Parent];
+  }
+
+  return Label[Pred];
 }
 
 void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
@@ -180,15 +271,10 @@ void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
     return LIt == Lvls.end() || LIt->second > MinLevel;
   };
 
-  auto DFSRes = runDFS(root, 0, LevelDescender);
-  currentDFSNum = DFSRes.nextDFSNum;
-  nodeToNum = std::move(DFSRes.nodeToNum); // Do we still need the 3 maps below?
-  numToNode = std::move(DFSRes.numToNode);
-  parents = std::move(DFSRes.DFSParent);
+  auto DFSRes = runDFS(root, LevelDescender);
+  DFSRes.dumpDFSNumbering();
 
-  dumpDFSNumbering();
-
-  semiNCA(Root, MinLevel);
+  semiNCA(DFSRes, Root, MinLevel);
 }
 
 void NewDomTree::computeUnreachableDominators(Node Root, Node Incoming,
@@ -206,112 +292,17 @@ void NewDomTree::computeUnreachableDominators(Node Root, Node Incoming,
     return true;
   };
 
-  auto DFSRes = runDFS(Root, currentDFSNum, UnreachableDescender);
-  currentDFSNum = DFSRes.nextDFSNum;
-  nodeToNum.insert(DFSRes.nodeToNum.begin(), DFSRes.nodeToNum.end());
-  numToNode.insert(DFSRes.numToNode.begin(), DFSRes.numToNode.end());
-  parents.insert(DFSRes.DFSParent.begin(), DFSRes.DFSParent.end());
+  auto DFSRes = runDFS(Root, UnreachableDescender);
+  DFSRes.dumpDFSNumbering();
 
-  dumpDFSNumbering();
-
-  // Init Root's level, so that its value can propagate down.
-  levels[Root] = levels[Incoming] + 1;
-  semiNCA(Root, 0);
+  semiNCA(DFSRes, Root, /* MinLevel = */  0, levels[Incoming] + 1);
   // Attach Root to existing tree.
   idoms[Root] = Incoming;
   sdoms[Root] = Incoming;
-  parents[Root] = Incoming; // Needed?
-}
-
-
-void NewDomTree::semiNCA(Node Root, const Index MinLevel) {
-  assert(nodeToNum.count(Root) != 0);
-  assert(currentDFSNum > 0 && "DFS not run?");
-  DenseMap<Node, Node> Label;
-  const Index StartNum = nodeToNum[Root];
-  const Index LastNum = currentDFSNum - 1;
-  dbgs() << "StartNum: " << StartNum << ": " << Root->getName() << "\n";
-  dbgs() << "LastNum: " << LastNum << ": " << numToNode[LastNum]->getName() << "\n";
-
-  // Step 0: initialize data structures.
-  for (Index i = currentDFSNum - 1; i >= StartNum &&
-                                    i < currentDFSNum; --i) {
-    auto N = numToNode[i];
-    idoms[N] = parents[N];
-    sdoms[N] = N;
-    Label[N] = N;
-  }
-
-  // levels are zero-initialized on read.
-
-  // Step 1: compute semidominators.
-  for (Index i = currentDFSNum - 1; i > StartNum; --i) {
-    auto CurrentNode = numToNode[i];
-    for (auto PredNode : predecessors(CurrentNode)) {
-      // Incoming arc from an unreachable node.
-      if (nodeToNum.count(PredNode) == 0)
-        continue;
-
-      if (levels[PredNode] < MinLevel)
-        continue;
-
-      Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, Label);
-      if (nodeToNum[sdoms[CurrentNode]] > nodeToNum[sdoms[SDomCandidate]])
-        sdoms[CurrentNode] = sdoms[SDomCandidate];
-    }
-    // Update Label for the current Node.
-    Label[CurrentNode] = sdoms[CurrentNode];
-  }
-
-  // Step 3: compute immediate dominators as
-  //   IDoms[i] = NCA(SDoms[i], SpanningTreeParent(i)).
-  // Note that IDoms were initialized to tree parents, so we don't need the
-  // original Parents array.
-  for (Index i = StartNum + 1; i < currentDFSNum; ++i) {
-    const auto CurrentNode = numToNode[i];
-    const auto SDom = sdoms[CurrentNode];
-    auto IDomCandidate = idoms[CurrentNode];
-    while (nodeToNum[IDomCandidate] > nodeToNum[SDom])
-      IDomCandidate = idoms[IDomCandidate];
-
-    idoms[CurrentNode] = IDomCandidate;
-    levels[CurrentNode] = levels[IDomCandidate] + 1;
-  }
-}
-
-// Non-recursive union-find-based semidominator path walker.
-Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
-                                  DenseMap<Node, Node> &Label) {
-  assert(Pred != Start && "Not a predecessor");
-  const Index StartNum = nodeToNum[Start];
-  const Index PredNum = nodeToNum[Pred];
-
-  if (PredNum < StartNum)
-    return Pred;
-
-  Node Next = Pred;
-  SmallVector<Node, 8> SDomPath;
-  // Walk the SDom path up the spanning tree.
-  do {
-    SDomPath.push_back(Next);
-    Next = parents[Next];
-  } while (nodeToNum[Next] > StartNum);
-
-  // Compress path.
-  for (auto i = SDomPath.size() - 2; i < SDomPath.size(); --i) {
-    const auto Current = SDomPath[i];
-    const auto Parent = SDomPath[i + 1];
-
-    if (nodeToNum[Label[Current]] > nodeToNum[Label[Parent]])
-      Label[Current] = Label[Parent];
-    parents[Current] = parents[Parent];
-  }
-
-  return Label[Pred];
 }
 
 bool NewDomTree::contains(Node N) const {
-  return nodeToNum.find(N) != nodeToNum.end();
+  return idoms.count(N) != 0;
 }
 
 Node NewDomTree::getIDom(Node N) const {
@@ -372,13 +363,13 @@ void NewDomTree::insertUnreachable(Node From, Node To) {
   assert(!contains(To));
   dbgs() << "Inserting " << From->getName() << " -> (unreachable) " <<
             To->getName() << "\n";
-  dbgs() << "\tidoms[" << To->getName() << "] = " << From->getName() << "\n";
-  idoms[To] = From;
-  dbgs() << "\tlevels[" << To->getName() << "] = " << levels[From] << "] + 1\n";
-  levels[To] = levels[From] + 1;
 
   SmallVector<std::pair<Node, Node>, 8> DiscoveredArcsToReachable;
   computeUnreachableDominators(To, From, DiscoveredArcsToReachable);
+
+  dbgs() << "Inserted " << From->getName() << " -> (prev unreachable) " <<
+            To->getName() << "\n";
+  dumpLevels();
 
   for (const auto &A : DiscoveredArcsToReachable)
     insertReachable(A.first, A.second);
@@ -493,7 +484,7 @@ bool NewDomTree::verifyAll() const {
 
 bool NewDomTree::verifyWithOldDT() const {
   assert(root);
-  assert(!nodeToNum.empty());
+  assert(!idoms.empty());
 
   DominatorTree DT(*root->getParent());
   bool Correct = true;
@@ -586,10 +577,7 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
   for (Index i = 0; i <= Level; ++i)
     OS << "  ";
 
-  const auto NodeNumIt = nodeToNum.find(N);
-  assert(NodeNumIt != nodeToNum.end());
-  OS << '[' << (Level + 1) << "] %" << N->getName() << " {" <<
-        NodeNumIt->second << "}\n";
+  OS << '[' << (Level + 1) << "] %" << N->getName() << " {}\n";
 
   const auto ChildrenIt = Children.find(N);
   if (ChildrenIt == Children.end())
@@ -603,10 +591,10 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
       printImpl(OS, C, Children, ToPrint);
 }
 
-void NewDomTree::dumpDFSNumbering(raw_ostream &OS) const {
+void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
   OS << "\nDFSNumbering:\n";
   OS << "\tnodeToNum size:\t" << nodeToNum.size() << "\n";
-  OS << "\tparents size:\t" << parents.size() << "\n";
+  OS << "\tparents size:\t" << parent.size() << "\n";
 
   using KeyValue = std::pair<Node, Index>;
   std::vector<KeyValue> Sorted(nodeToNum.begin(),
@@ -618,6 +606,13 @@ void NewDomTree::dumpDFSNumbering(raw_ostream &OS) const {
 
   for (const auto &NodeToNum : Sorted)
     OS << NodeToNum.first->getName() << " {" << NodeToNum.second << "}\n";
+}
+
+void NewDomTree::dumpLevels(raw_ostream &OS) const {
+  OS << "\nLevels:\n";
+  for (const auto &NodeToLevel : levels)
+    OS << "  " << NodeToLevel.first->getName() << ": " << NodeToLevel.second <<
+          "\n";
 }
 
 void NewDomTree::addDebugInfoToIR() {
@@ -829,7 +824,6 @@ int main(int argc, char **argv) {
   dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 
   NewDomTree DT(RootBB);
-  DT.dumpDFSNumbering();
 
   if (!DT.verifyAll())
     errs() << "NewDomTree verification failed.\n";
