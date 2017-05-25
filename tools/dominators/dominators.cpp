@@ -622,6 +622,9 @@ void NewDomTree::addDebugInfoToIR() {
   auto *IntTy = IntegerType::get(M->getContext(), 1);
 
   for (const auto& NodeToIDom : idoms) {
+    if (!NodeToIDom.second)
+      continue;
+    
     auto BB = NodeToIDom.first;
     auto SD = sdoms[BB];
     auto ID = NodeToIDom.second;
@@ -829,6 +832,10 @@ int main(int argc, char **argv) {
     errs() << "NewDomTree verification failed.\n";
 
   DT.dump();
+  if (ViewCFG) {
+    DT.addDebugInfoToIR();
+    DT.viewCFG();
+  }
 
   Optional<InputGraph::CFGUpdate> Update;
   while ((Update = Graph.applyUpdate())) {
