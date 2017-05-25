@@ -248,7 +248,10 @@ void NewDomTree::semiNCA(Node Root, const Index MinLevel) {
   for (Index i = currentDFSNum - 1; i > StartNum; --i) {
     auto CurrentNode = numToNode[i];
     for (auto PredNode : predecessors(CurrentNode)) {
-      assert(nodeToNum.count(PredNode) != 0);
+      // Incoming arc from an unreachable node.
+      if (nodeToNum.count(PredNode) == 0)
+        continue;
+
       if (levels[PredNode] < MinLevel)
         continue;
 
@@ -624,7 +627,7 @@ void NewDomTree::addDebugInfoToIR() {
   for (const auto& NodeToIDom : idoms) {
     if (!NodeToIDom.second)
       continue;
-    
+
     auto BB = NodeToIDom.first;
     auto SD = sdoms[BB];
     auto ID = NodeToIDom.second;
