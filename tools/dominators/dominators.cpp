@@ -11,10 +11,10 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SparseSet.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/TypeBuilder.h"
 #include "llvm/Support/CommandLine.h"
@@ -24,34 +24,32 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Program.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <cctype>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <queue>
-#include <string>
-#include <sstream>
 #include <queue>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
 using namespace llvm;
 
-static cl::opt<std::string>
-    InputFile(cl::Positional, cl::desc("<input file>"), cl::init("-"));
-static cl::opt<bool>
-    ViewCFG("view-cfg", cl::desc("View CFG"));
-
+static cl::opt<std::string> InputFile(cl::Positional, cl::desc("<input file>"),
+                                      cl::init("-"));
+static cl::opt<bool> ViewCFG("view-cfg", cl::desc("View CFG"));
 
 using Node = BasicBlock *;
 using Index = unsigned;
 static constexpr Index UndefIndex = static_cast<Index>(-1);
 
 struct NodeByName {
-  bool operator() (const Node first, const Node second) const {
+  bool operator()(const Node first, const Node second) const {
     const auto Cmp = first->getName().compare_numeric(second->getName());
     if (Cmp == 0)
       return less{}(first, second);
@@ -65,8 +63,9 @@ public:
   NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
 
   void computeReachableDominators(Node Root, Index MinLevel);
-  void computeUnreachableDominators(Node Root, Node Incoming,
-         SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
+  void computeUnreachableDominators(
+      Node Root, Node Incoming,
+      SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
 
   struct DFSResult {
     Index nextDFSNum = 0;
@@ -74,10 +73,10 @@ public:
     DenseMap<Index, Node> numToNode;
     DenseMap<Node, Node> parent;
 
-    void dumpDFSNumbering(raw_ostream& OS = dbgs()) const;
+    void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
   };
 
-  template<typename DescendCondition>
+  template <typename DescendCondition>
   static DFSResult runDFS(Node Start, DescendCondition Condition);
 
   void semiNCA(DFSResult &DFS, Node Root, Index MinLevel, Index RootLevel = 0);
@@ -93,10 +92,10 @@ public:
   bool verifyWithOldDT() const;
   bool verifyNCA() const;
   bool verifyLevels() const;
-  void print(raw_ostream& OS) const;
+  void print(raw_ostream &OS) const;
   void dump() const { print(dbgs()); }
 
-// private: // Public for testing purposes.
+  // private: // Public for testing purposes.
   Node root;
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> sdoms;
@@ -113,7 +112,8 @@ public:
     };
 
     std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
-                        DecreasingLevel> bucket;
+                        DecreasingLevel>
+        bucket;
     DenseSet<Node> affected;
     DenseSet<Node> visited;
     SmallVector<Node, 8> affectedQueue;
@@ -130,7 +130,7 @@ public:
   void updateLevels(InsertionInfo &II);
 
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
-  void printImpl(raw_ostream& OS, Node N, const ChildrenTy &Children,
+  void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
                  std::set<Node, NodeByName> &ToPrint) const;
 
 public:
@@ -143,7 +143,7 @@ public:
   }
 };
 
-template<typename DescendCondition>
+template <typename DescendCondition>
 NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
                                          DescendCondition Condition) {
   DFSResult Res;
@@ -184,8 +184,8 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   DenseMap<Node, Node> Label;
   const Index LastNum = DFS.nextDFSNum - 1;
   dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n";
-  dbgs() << "LastNum: " << LastNum << ": " <<
-         DFS.numToNode[LastNum]->getName() << "\n";
+  dbgs() << "LastNum: " << LastNum << ": " << DFS.numToNode[LastNum]->getName()
+         << "\n";
 
   // Step 0: initialize data structures.
   for (Index i = 0; i <= LastNum; ++i) {
@@ -266,7 +266,7 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
 
 void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
   auto &Lvls = levels; // Don't capture `this`.
-  auto LevelDescender = [MinLevel, &Lvls] (Node, Node To) -> bool { // CLion...
+  auto LevelDescender = [MinLevel, &Lvls](Node, Node To) -> bool { // CLion...
     auto LIt = Lvls.find(To);
     return LIt == Lvls.end() || LIt->second > MinLevel;
   };
@@ -277,12 +277,13 @@ void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
   semiNCA(DFSRes, Root, MinLevel);
 }
 
-void NewDomTree::computeUnreachableDominators(Node Root, Node Incoming,
-       SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs) {
+void NewDomTree::computeUnreachableDominators(
+    Node Root, Node Incoming,
+    SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs) {
   assert(contains(Incoming));
   assert(!contains(Root));
-  auto UnreachableDescender = [&DiscoveredConnectingArcs, this] (Node From,
-                                                                 Node To) {
+  auto UnreachableDescender = [&DiscoveredConnectingArcs, this](Node From,
+                                                                Node To) {
     // Arc unreachable -> reachable
     if (contains(To)) {
       DiscoveredConnectingArcs.push_back({From, To});
@@ -295,15 +296,13 @@ void NewDomTree::computeUnreachableDominators(Node Root, Node Incoming,
   auto DFSRes = runDFS(Root, UnreachableDescender);
   DFSRes.dumpDFSNumbering();
 
-  semiNCA(DFSRes, Root, /* MinLevel = */  0, levels[Incoming] + 1);
+  semiNCA(DFSRes, Root, /* MinLevel = */ 0, levels[Incoming] + 1);
   // Attach Root to existing tree.
   idoms[Root] = Incoming;
   sdoms[Root] = Incoming;
 }
 
-bool NewDomTree::contains(Node N) const {
-  return idoms.count(N) != 0;
-}
+bool NewDomTree::contains(Node N) const { return idoms.count(N) != 0; }
 
 Node NewDomTree::getIDom(Node N) const {
   assert(contains(N));
@@ -361,28 +360,27 @@ void NewDomTree::insertArc(Node From, Node To) {
 
 void NewDomTree::insertUnreachable(Node From, Node To) {
   assert(!contains(To));
-  dbgs() << "Inserting " << From->getName() << " -> (unreachable) " <<
-            To->getName() << "\n";
+  dbgs() << "Inserting " << From->getName() << " -> (unreachable) "
+         << To->getName() << "\n";
 
   SmallVector<std::pair<Node, Node>, 8> DiscoveredArcsToReachable;
   computeUnreachableDominators(To, From, DiscoveredArcsToReachable);
 
-  dbgs() << "Inserted " << From->getName() << " -> (prev unreachable) " <<
-            To->getName() << "\n";
+  dbgs() << "Inserted " << From->getName() << " -> (prev unreachable) "
+         << To->getName() << "\n";
   dumpLevels();
 
   for (const auto &A : DiscoveredArcsToReachable)
     insertReachable(A.first, A.second);
 }
 
-
 void NewDomTree::insertReachable(Node From, Node To) {
   InsertionInfo II;
   const Node NCA = findNCA(From, To);
   const Node ToIDom = getIDom(To);
 
-  dbgs() << "Inserting a reachable arc: " << From->getName() << " -> " <<
-            To->getName() << "\n";
+  dbgs() << "Inserting a reachable arc: " << From->getName() << " -> "
+         << To->getName() << "\n";
 
   // Nothing affected.
   if (NCA == To || NCA == ToIDom)
@@ -404,7 +402,8 @@ void NewDomTree::insertReachable(Node From, Node To) {
     visit(CurrentNode, getLevel(CurrentNode), NCA, II);
   }
 
-  dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName() << "\n";
+  dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName()
+         << "\n";
   update(NCA, II);
 
   dbgs() << "Clearing stuff\n";
@@ -416,7 +415,8 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
 
   for (const auto Succ : successors(N)) {
     const Index SuccLevel = getLevel(Succ);
-    dbgs() << "\tSuccessor " << Succ->getName() << ", level = " << SuccLevel << "\n";
+    dbgs() << "\tSuccessor " << Succ->getName() << ", level = " << SuccLevel
+           << "\n";
     // Succ dominated by subtree root -- not affected.
     if (SuccLevel > RootLevel) {
       dbgs() << "\t\tdominated by subtree root\n";
@@ -428,8 +428,8 @@ void NewDomTree::visit(Node N, Index RootLevel, Node NCA, InsertionInfo &II) {
       II.visitedNotAffectedQueue.push_back(Succ);
       visit(Succ, RootLevel, NCA, II);
     } else if ((SuccLevel > NCALevel + 1) && II.affected.count(Succ) == 0) {
-      dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName() <<
-                "\n";
+      dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName()
+             << "\n";
       II.affected.insert(Succ);
       II.bucket.push({SuccLevel, Succ});
     }
@@ -454,8 +454,8 @@ void NewDomTree::updateLevels(InsertionInfo &II) {
   dbgs() << "Updating levels\n";
   // Update levels of visited but not affected nodes;
   for (const Node N : II.visitedNotAffectedQueue) {
-    dbgs() << "\tlevels[" << N->getName() << "] = levels[" << idoms[N]->getName() <<
-              "] + 1\n";
+    dbgs() << "\tlevels[" << N->getName() << "] = levels["
+           << idoms[N]->getName() << "] + 1\n";
     levels[N] = levels[idoms[N]] + 1;
   }
 }
@@ -489,7 +489,7 @@ bool NewDomTree::verifyWithOldDT() const {
   DominatorTree DT(*root->getParent());
   bool Correct = true;
 
-  for (const auto& NodeToIDom : idoms) {
+  for (const auto &NodeToIDom : idoms) {
     if (NodeToIDom.first == root)
       continue;
 
@@ -498,9 +498,9 @@ bool NewDomTree::verifyWithOldDT() const {
     auto DTN = DT.getNode(Node);
     auto *CorrectIDom = DTN->getIDom()->getBlock();
     if (CorrectIDom != IDom) {
-      errs() << "!! NewDT:\t" << Node->getName() << " -> " <<
-                IDom->getName() << "\n   OldDT:\t" << Node->getName() <<
-                " -> " << CorrectIDom->getName() << "\n";
+      errs() << "!! NewDT:\t" << Node->getName() << " -> " << IDom->getName()
+             << "\n   OldDT:\t" << Node->getName() << " -> "
+             << CorrectIDom->getName() << "\n";
       Correct = false;
     }
   }
@@ -523,8 +523,8 @@ bool NewDomTree::verifyNCA() const {
       auto NCA = findNCA(&BB, Succ);
       if (NCA != Succ && NCA != getIDom(Succ)) {
         Correct = false;
-        dbgs() << "Error:\tNCA(" << BB.getName() << ", " << Succ->getName() <<
-                  ") = " << NCA->getName();
+        dbgs() << "Error:\tNCA(" << BB.getName() << ", " << Succ->getName()
+               << ") = " << NCA->getName();
       }
     }
   }
@@ -544,15 +544,15 @@ bool NewDomTree::verifyLevels() const {
     const Index IDomL = getLevel(IDom);
     if (BBL != (IDomL + 1)) {
       Correct = false;
-      dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", " <<
-             "Level(" << IDom << ") = " << IDomL << "\n";
+      dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", "
+             << "Level(" << IDom << ") = " << IDomL << "\n";
     }
   }
 
   return Correct;
 }
 
-void NewDomTree::print(raw_ostream& OS) const {
+void NewDomTree::print(raw_ostream &OS) const {
   assert(!idoms.empty());
   std::set<Node, NodeByName> ToPrint;
   ChildrenTy Children;
@@ -586,7 +586,7 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
   std::vector<Node> SortedChildren(ChildrenIt->second.begin(),
                                    ChildrenIt->second.end());
   std::sort(SortedChildren.begin(), SortedChildren.end());
-  for (const auto& C : SortedChildren)
+  for (const auto &C : SortedChildren)
     if (ToPrint.count(C) != 0)
       printImpl(OS, C, Children, ToPrint);
 }
@@ -597,8 +597,7 @@ void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
   OS << "\tparents size:\t" << parent.size() << "\n";
 
   using KeyValue = std::pair<Node, Index>;
-  std::vector<KeyValue> Sorted(nodeToNum.begin(),
-                                             nodeToNum.end());
+  std::vector<KeyValue> Sorted(nodeToNum.begin(), nodeToNum.end());
 
   sort(Sorted.begin(), Sorted.end(), [](KeyValue first, KeyValue second) {
     return first.first->getName().compare(second.first->getName()) < 0;
@@ -611,15 +610,15 @@ void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
 void NewDomTree::dumpLevels(raw_ostream &OS) const {
   OS << "\nLevels:\n";
   for (const auto &NodeToLevel : levels)
-    OS << "  " << NodeToLevel.first->getName() << ": " << NodeToLevel.second <<
-          "\n";
+    OS << "  " << NodeToLevel.first->getName() << ": " << NodeToLevel.second
+       << "\n";
 }
 
 void NewDomTree::addDebugInfoToIR() {
   auto M = root->getParent()->getParent();
   auto *IntTy = IntegerType::get(M->getContext(), 1);
 
-  for (const auto& NodeToIDom : idoms) {
+  for (const auto &NodeToIDom : idoms) {
     if (!NodeToIDom.second)
       continue;
 
@@ -648,13 +647,12 @@ struct GraphCFG {
   Function *function;
   DenseMap<unsigned, BasicBlock *> numToBB;
 
-  GraphCFG(StringRef moduleName = "GraphCFG")
-      : module(moduleName, context) {
+  GraphCFG(StringRef moduleName = "GraphCFG") : module(moduleName, context) {
     FunctionType *FTy = TypeBuilder<void(), false>::get(context);
     function = cast<Function>(module.getOrInsertFunction("dummy_f", FTy));
   }
 
-  std::pair<BasicBlock *, BasicBlock*>
+  std::pair<BasicBlock *, BasicBlock *>
   getArc(std::pair<unsigned, unsigned> arc) {
     return {numToBB[arc.first], numToBB[arc.second]};
   };
@@ -669,7 +667,10 @@ struct InputGraph {
   std::vector<Arc> arcs;
 
   enum class Op : char { Insert, Delete };
-  struct Update { Op action; Arc arc; };
+  struct Update {
+    Op action;
+    Arc arc;
+  };
   std::vector<Update> updates;
 
   std::unique_ptr<GraphCFG> cfg;
@@ -681,15 +682,18 @@ struct InputGraph {
 
     OS << "Updates:\n";
     for (const auto &U : updates)
-      OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first <<
-            "\t->\t" << U.arc.second << "\n";
+      OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first
+         << "\t->\t" << U.arc.second << "\n";
   }
 
   // Returns entry/root;
-  BasicBlock * toCFG();
+  BasicBlock *toCFG();
 
   using CFGArc = std::pair<BasicBlock *, BasicBlock *>;
-  struct CFGUpdate { Op action; CFGArc arc; };
+  struct CFGUpdate {
+    Op action;
+    CFGArc arc;
+  };
   Optional<CFGUpdate> applyUpdate();
 };
 
@@ -704,39 +708,41 @@ InputGraph readInputGraph(std::string path) {
     char Action;
     ISS >> Action;
     switch (Action) {
-      default: llvm_unreachable("Unknown action");
-      case 'p': {
-        assert(Graph.nodesNum == 0 && "Double init?");
-        unsigned nodesNum, arcsNum, entry, dummy;
-        if (!(ISS >> nodesNum >> arcsNum >> entry >> dummy))
-          llvm_unreachable("Parse error");
-        Graph.nodesNum = nodesNum;
-        Graph.arcs.reserve(arcsNum);
-        Graph.entry = entry;
-      } break;
-      case 'a': {
-        unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
-        Graph.arcs.push_back({x, y});
-      } break;
-      case 'e': break;
-      case 'i': {
-        unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
-        assert(x <= Graph.nodesNum);
-        assert(y <= Graph.nodesNum);
-        Graph.updates.push_back({InputGraph::Op::Insert, {x, y}});
-      } break;
-      case 'd': {
-        unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
-        assert(x <= Graph.nodesNum);
-        assert(y <= Graph.nodesNum);
-        Graph.updates.push_back({InputGraph::Op::Delete, {x, y}});
-      } break;
+    default:
+      llvm_unreachable("Unknown action");
+    case 'p': {
+      assert(Graph.nodesNum == 0 && "Double init?");
+      unsigned nodesNum, arcsNum, entry, dummy;
+      if (!(ISS >> nodesNum >> arcsNum >> entry >> dummy))
+        llvm_unreachable("Parse error");
+      Graph.nodesNum = nodesNum;
+      Graph.arcs.reserve(arcsNum);
+      Graph.entry = entry;
+    } break;
+    case 'a': {
+      unsigned x, y;
+      if (!(ISS >> x >> y))
+        llvm_unreachable("Parse error");
+      Graph.arcs.push_back({x, y});
+    } break;
+    case 'e':
+      break;
+    case 'i': {
+      unsigned x, y;
+      if (!(ISS >> x >> y))
+        llvm_unreachable("Parse error");
+      assert(x <= Graph.nodesNum);
+      assert(y <= Graph.nodesNum);
+      Graph.updates.push_back({InputGraph::Op::Insert, {x, y}});
+    } break;
+    case 'd': {
+      unsigned x, y;
+      if (!(ISS >> x >> y))
+        llvm_unreachable("Parse error");
+      assert(x <= Graph.nodesNum);
+      assert(y <= Graph.nodesNum);
+      Graph.updates.push_back({InputGraph::Op::Delete, {x, y}});
+    } break;
     }
   }
 
@@ -744,8 +750,8 @@ InputGraph readInputGraph(std::string path) {
 }
 
 static void connect(BasicBlock *From, BasicBlock *To) {
-  auto *IntTy = IntegerType::get(From->getParent()->getParent()->getContext(),
-                                 32);
+  auto *IntTy =
+      IntegerType::get(From->getParent()->getParent()->getContext(), 32);
   if (!From->getTerminator()) {
     IRBuilder<> IRB(From);
     IRB.CreateSwitch(ConstantInt::get(IntTy, 0), To);
@@ -762,10 +768,10 @@ static void connect(BasicBlock *From, BasicBlock *To) {
 BasicBlock *InputGraph::toCFG() {
   cfg = make_unique<GraphCFG>();
   GraphCFG &CFG = *cfg;
-  BasicBlock* EntryBB = nullptr;
+  BasicBlock *EntryBB = nullptr;
   std::vector<BasicBlock *> Blocks(nodesNum);
 
-  auto MakeBB = [&] (StringRef name) -> BasicBlock * {
+  auto MakeBB = [&](StringRef name) -> BasicBlock * {
     return BasicBlock::Create(CFG.context, name, CFG.function);
   };
 
