@@ -87,10 +87,9 @@ public:
 private:
   Node root;
   DenseMap<Node, Node> idoms;
-  DenseMap<Node, Node> sdoms;
+  DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
   DenseMap<Node, Node> preorderParents;
-  DenseMap<Node, Node> sdomPathPredecessors;
   DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
 
   void computeReachableDominators(Node Root, Index MinLevel);
@@ -110,7 +109,8 @@ private:
   template <typename DescendCondition>
   static DFSResult runDFS(Node Start, DescendCondition Condition);
 
-  void semiNCA(DFSResult &DFS, Node Root, Index MinLevel, Index RootLevel = 0);
+  void semiNCA(DFSResult &DFS, Node Root, Index MinLevel,
+               Node AttachTo = nullptr);
 
   struct InsertionInfo {
     using BucketElementTy = std::pair<Index, Node>;
@@ -183,10 +183,11 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
 }
 
 void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
-                         const Index RootLevel /* = 0 */) {
+                         const Node AttachTo /* = nullptr */) {
   // assert(DFS.nodeToNum.count(Root) != 0);
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
   DenseMap<Node, Node> Label;
+  DenseMap<Node, Node> SDoms;
   const Index LastNum = DFS.nextDFSNum - 1;
   dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n";
   dbgs() << "LastNum: " << LastNum << ": " << DFS.numToNode[LastNum]->getName()
@@ -196,12 +197,12 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   for (Index i = 0; i <= LastNum; ++i) {
     auto N = DFS.numToNode[i];
     idoms[N] = DFS.parent[N];
-    sdoms[N] = N;
+    SDoms[N] = N;
     Label[N] = N;
   }
 
   idoms[Root] = Root;
-  levels[Root] = RootLevel;
+  levels[Root] = AttachTo ? (getLevel(AttachTo) + 1) : 0;
 
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
@@ -215,14 +216,14 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
         continue;
 
       Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, DFS, Label);
-      if (DFS.nodeToNum[sdoms[CurrentNode]] >
-          DFS.nodeToNum[sdoms[SDomCandidate]]) {
-        sdoms[CurrentNode] = sdoms[SDomCandidate];
-        sdomPathPredecessors[CurrentNode] = SDomCandidate;
+      if (DFS.nodeToNum[SDoms[CurrentNode]] >
+          DFS.nodeToNum[SDoms[SDomCandidate]]) {
+        SDoms[CurrentNode] = SDoms[SDomCandidate];
+        rdoms[CurrentNode] = SDomCandidate;
       }
     }
     // Update Label for the current Node.
-    Label[CurrentNode] = sdoms[CurrentNode];
+    Label[CurrentNode] = SDoms[CurrentNode];
   }
 
   // Step 3: compute immediate dominators as
@@ -231,7 +232,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   // original Parents array.
   for (Index i = 1; i <= LastNum; ++i) {
     const auto CurrentNode = DFS.numToNode[i];
-    const auto SDom = sdoms[CurrentNode];
+    const auto SDom = SDoms[CurrentNode];
     auto IDomCandidate = idoms[CurrentNode];
     while (DFS.nodeToNum[IDomCandidate] > DFS.nodeToNum[SDom])
       IDomCandidate = idoms[IDomCandidate];
@@ -239,6 +240,12 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
     idoms[CurrentNode] = IDomCandidate;
     levels[CurrentNode] = levels[IDomCandidate] + 1;
   }
+
+  if (!AttachTo)
+    return;
+
+  idoms[Root] = AttachTo;
+  rdoms[Root] = AttachTo;
 }
 
 // Non-recursive union-find-based semidominator path walker.
@@ -306,10 +313,7 @@ void NewDomTree::computeUnreachableDominators(
   preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
   DFSRes.dumpDFSNumbering();
 
-  semiNCA(DFSRes, Root, /* MinLevel = */ 0, levels[Incoming] + 1);
-  // Attach Root to existing tree.
-  idoms[Root] = Incoming;
-  sdoms[Root] = Incoming;
+  semiNCA(DFSRes, Root, /* MinLevel = */ 0, Incoming);
 }
 
 bool NewDomTree::contains(Node N) const { return idoms.count(N) != 0; }
@@ -521,10 +525,8 @@ bool NewDomTree::isReachableFromIDom(Node N) {
 void NewDomTree::deleteReachable(Node From, Node To) {
   auto parentIt = preorderParents.find(To);
   if (parentIt != preorderParents.end() && From != parentIt->second) {
-    // What happens when why try to delete an arc that first connected
-    // unreachable region? SNCA doesn't assign an spath to it.
-    assert(sdomPathPredecessors.count(To) != 0);
-    if (sdomPathPredecessors[To] != From)
+    assert(rdoms.count(To) != 0);
+    if (rdoms[To] != From)
       return;
   }
 
@@ -543,12 +545,7 @@ void NewDomTree::deleteReachable(Node From, Node To) {
   preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
 
   dbgs() << "Running SNCA\n";
-  semiNCA(DFSRes, IDomTo, Level, Level);
-  // Reattach.
-  idoms[IDomTo] = PrevIDomSubTree;
-  sdoms[IDomTo] = PrevIDomSubTree;
-  dbgs() << "Reattaching:\n" << "idoms[" << IDomTo->getName() << "] = "
-         << PrevIDomSubTree->getName() << "\nDeleted\n";
+  semiNCA(DFSRes, IDomTo, Level, PrevIDomSubTree);
 }
 
 void NewDomTree::deleteUnreachable(Node From, Node To) {
@@ -581,10 +578,9 @@ void NewDomTree::deleteUnreachable(Node From, Node To) {
   for (Index i = 0; i < DFSRes.nextDFSNum; ++i) {
     const Node N = DFSRes.numToNode[i];
     idoms.erase(N);
-    sdoms.erase(N);
+    rdoms.erase(N);
     levels.erase(N);
     preorderParents.erase(N);
-    sdomPathPredecessors.erase(N);
   }
 
   if (MinNode == To)
@@ -600,12 +596,7 @@ void NewDomTree::deleteUnreachable(Node From, Node To) {
   DFSRes.dumpDFSNumbering();
 
   dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName() << "\n";
-  semiNCA(DFSRes, MinNode, MinLevel, MinLevel);
-  // Reattach.
-  idoms[MinNode] = PrevIDomMin;
-  sdoms[MinNode] = PrevIDomMin;
-  dbgs() << "Reattaching:\n" << "idoms[" << MinNode->getName() << "] = "
-         << PrevIDomMin->getName() << "\nDeleted unreachable\n";
+  semiNCA(DFSRes, MinNode, MinLevel, PrevIDomMin);
 }
 
 bool NewDomTree::verifyAll() const {
@@ -770,7 +761,6 @@ void NewDomTree::addDebugInfoToIR() {
 
   for (const auto &NodeToIDom : idoms) {
     auto BB = NodeToIDom.first;
-    auto SD = sdoms[BB];
     auto ID = NodeToIDom.second;
 
     std::string Buffer;
@@ -782,7 +772,11 @@ void NewDomTree::addDebugInfoToIR() {
     Builder.CreateAlloca(IntTy, nullptr, Buffer);
     Buffer.clear();
 
-    RSO << "sdom___" << SD->getName() << "___";
+    if (rdoms.count(BB) == 0)
+      continue;
+
+    auto RD = rdoms[BB];
+    RSO << "rdom___" << RD->getName() << "___";
     RSO.flush();
     Builder.CreateAlloca(IntTy, nullptr, Buffer);
   }
