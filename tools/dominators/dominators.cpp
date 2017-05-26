@@ -488,6 +488,8 @@ void NewDomTree::deleteArc(Node From, Node To) {
     return;
 
   const Node IDomTo = getIDom(To);
+  dbgs() << "NCA " << NCA->getName() << ", IDomTo " << IDomTo->getName()
+         << "\n";
 
   // To stays reachable.
   if (From != IDomTo || isReachableFromIDom(To))
@@ -588,12 +590,14 @@ void NewDomTree::deleteUnreachable(Node From, Node To) {
   if (MinNode == To)
     return;
 
-  DFSRes = 
-
   dbgs() << "DeleteUnreachable: running SNCA(MinNode = "
          << MinNode->getName() << ")\n";
   const Index MinLevel = getLevel(MinNode);
   const Node PrevIDomMin = getIDom(MinNode);
+  DFSRes = runDFS(MinNode, [MinLevel, this] (Node, Node To) {
+    return contains(To) && getLevel(To) > MinLevel;
+  });
+  DFSRes.dumpDFSNumbering();
   MinNode->getParent()->viewCFG();
   dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName() << "\n";
   semiNCA(DFSRes, MinNode, MinLevel, MinLevel);
@@ -919,6 +923,17 @@ static void disconnect(BasicBlock *From, BasicBlock *To) {
 
   if (SI->getNumCases() == 0) {
     SI->removeFromParent();
+    return;
+  }
+
+  if (SI->getDefaultDest() == To) {
+    dbgs() << "Swapping default case:\n\t";
+    SI->dump();
+    auto FirstC = SI->case_begin();
+    SI->setDefaultDest(FirstC->getCaseSuccessor());
+    SI->removeCase(FirstC);
+    dbgs() << "After:\n\t";
+    SI->dump();
     return;
   }
 
