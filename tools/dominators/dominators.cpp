@@ -90,7 +90,6 @@ private:
   DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
   DenseMap<Node, Node> preorderParents;
-  DenseMap<Node, Index> descendantsNum; // FIXME: Compute it.
 
   void computeReachableDominators(Node Root, Index MinLevel);
   void computeUnreachableDominators(
@@ -141,7 +140,7 @@ private:
 
   bool isReachableFromIDom(Node N);
   void deleteReachable(Node From, Node To);
-  void deleteUnreachable(Node From, Node To);
+  void deleteUnreachable(Node To);
 
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
   void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
@@ -184,7 +183,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
 
 void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
                          const Node AttachTo /* = nullptr */) {
-  // assert(DFS.nodeToNum.count(Root) != 0);
+  assert(DFS.nodeToNum.count(Root) != 0);
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
   DenseMap<Node, Node> Label;
   DenseMap<Node, Node> SDoms;
@@ -202,7 +201,10 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   }
 
   idoms[Root] = Root;
-  levels[Root] = AttachTo ? (getLevel(AttachTo) + 1) : 0;
+  if (Root == root || !AttachTo)
+    levels[Root] = 0;
+  else
+    levels[Root] = getLevel(AttachTo) + 1;
 
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
@@ -499,7 +501,7 @@ void NewDomTree::deleteArc(Node From, Node To) {
   if (From != IDomTo || isReachableFromIDom(To))
     deleteReachable(From, To);
   else
-    deleteUnreachable(From, To);
+    deleteUnreachable(To);
 
   if (!verifyAll())
     dbgs() << "Verification after deletion failed!\n";
@@ -548,7 +550,7 @@ void NewDomTree::deleteReachable(Node From, Node To) {
   semiNCA(DFSRes, IDomTo, Level, PrevIDomSubTree);
 }
 
-void NewDomTree::deleteUnreachable(Node From, Node To) {
+void NewDomTree::deleteUnreachable(Node To) {
   dbgs() << "Deleting unreachable " << To->getName() << "\n";
 
   SmallVector<Node, 8> affectedQueue;
@@ -703,7 +705,7 @@ void NewDomTree::print(raw_ostream &OS) const {
     ToPrint.insert(NodeToIDom.first);
   }
 
-  dbgs() << "\nPreorder New Dominator Tree:\n";
+  dbgs() << "\nNew Dominator Tree:\n";
   while (!ToPrint.empty())
     printImpl(OS, *ToPrint.begin(), Children, ToPrint);
   dbgs() << "\n";
@@ -718,7 +720,8 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
   for (Index i = 0; i <= Level; ++i)
     OS << "  ";
 
-  OS << '[' << (Level + 1) << "] %" << N->getName() << " {}\n";
+  OS << '[' << (Level + 1) << "] %" << N->getName() << " {"
+     << '_' << "}\n";
 
   const auto ChildrenIt = Children.find(N);
   if (ChildrenIt == Children.end())
