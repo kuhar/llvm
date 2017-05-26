@@ -184,7 +184,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
 
 void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
                          const Index RootLevel /* = 0 */) {
-  assert(DFS.nodeToNum.count(Root) != 0);
+  // assert(DFS.nodeToNum.count(Root) != 0);
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
   DenseMap<Node, Node> Label;
   const Index LastNum = DFS.nextDFSNum - 1;
@@ -530,7 +530,7 @@ void NewDomTree::deleteReachable(Node From, Node To) {
   const Node IDomTo = getIDom(To);
   const Node PrevIDomSubTree = getIDom(IDomTo);
   const Index Level = getLevel(IDomTo);
-  auto DescendBelow = [Level, this](Node From, Node To) {
+  auto DescendBelow = [Level, this](Node, Node To) {
     return getLevel(To) > Level;
   };
 
@@ -550,7 +550,58 @@ void NewDomTree::deleteReachable(Node From, Node To) {
 }
 
 void NewDomTree::deleteUnreachable(Node From, Node To) {
-  llvm_unreachable("Not implemented");
+  dbgs() << "Deleting unreachable " << To->getName() << "\n";
+
+  SmallVector<Node, 8> affectedQueue;
+  SmallDenseSet<Node, 8> affected;
+
+  const Index Level = getLevel(To);
+  auto DescendCollect = [Level, &affectedQueue, &affected, this](Node, Node To) {
+    if (getLevel(To) > Level)
+      return true;
+    if (affected.count(To) == 0) {
+      affected.insert(To);
+      affectedQueue.push_back(To);
+    }
+    return false;
+  };
+
+  auto DFSRes = runDFS(To, DescendCollect);
+  DFSRes.dumpDFSNumbering();
+  Node MinNode = To;
+
+  for (const Node N : affectedQueue) {
+    const Node NCA = findNCA(N, To);
+    if (NCA != N && getLevel(NCA) < getLevel(MinNode))
+      MinNode = NCA;
+  }
+
+  for (Index i = 0; i < DFSRes.nextDFSNum; ++i) {
+    const Node N = DFSRes.numToNode[i];
+    idoms.erase(N);
+    sdoms.erase(N);
+    levels.erase(N);
+    preorderParents.erase(N);
+    sdomPathPredecessors.erase(N);
+  }
+
+  if (MinNode == To)
+    return;
+
+  DFSRes = 
+
+  dbgs() << "DeleteUnreachable: running SNCA(MinNode = "
+         << MinNode->getName() << ")\n";
+  const Index MinLevel = getLevel(MinNode);
+  const Node PrevIDomMin = getIDom(MinNode);
+  MinNode->getParent()->viewCFG();
+  dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName() << "\n";
+  semiNCA(DFSRes, MinNode, MinLevel, MinLevel);
+  // Reattach.
+  idoms[MinNode] = PrevIDomMin;
+  sdoms[MinNode] = PrevIDomMin;
+  dbgs() << "Reattaching:\n" << "idoms[" << MinNode->getName() << "] = "
+         << PrevIDomMin->getName() << "\nDeleted unreachable\n";
 }
 
 bool NewDomTree::verifyAll() const {
@@ -588,6 +639,8 @@ bool NewDomTree::verifyWithOldDT() const {
 
     auto Node = NodeToIDom.first;
     auto IDom = NodeToIDom.second;
+    errs() << "Veryfing arc:\t" << Node->getName() << " -> "
+           << IDom->getName() << "\n";
     auto DTN = DT.getNode(Node);
     auto *CorrectIDom = DTN->getIDom()->getBlock();
     if (CorrectIDom != IDom) {
@@ -856,8 +909,19 @@ static void connect(BasicBlock *From, BasicBlock *To) {
 }
 
 static void disconnect(BasicBlock *From, BasicBlock *To) {
+  dbgs() << "Deleting BB arc " << From->getName() << " -> "
+         << To->getName() << "\n";
+  dbgs().flush();
+  if (!From->getTerminator()) {
+    From->getParent()->viewCFG();
+  }
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
-  assert(SI);
+
+  if (SI->getNumCases() == 0) {
+    SI->removeFromParent();
+    return;
+  }
+
   for (auto CIt = SI->case_begin(); CIt != SI->case_end(); ++CIt)
     if (CIt->getCaseSuccessor() == To) {
       SI->removeCase(CIt);
