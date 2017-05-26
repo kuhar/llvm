@@ -598,7 +598,7 @@ void NewDomTree::deleteUnreachable(Node From, Node To) {
     return contains(To) && getLevel(To) > MinLevel;
   });
   DFSRes.dumpDFSNumbering();
-  MinNode->getParent()->viewCFG();
+
   dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName() << "\n";
   semiNCA(DFSRes, MinNode, MinLevel, MinLevel);
   // Reattach.
@@ -916,24 +916,17 @@ static void disconnect(BasicBlock *From, BasicBlock *To) {
   dbgs() << "Deleting BB arc " << From->getName() << " -> "
          << To->getName() << "\n";
   dbgs().flush();
-  if (!From->getTerminator()) {
-    From->getParent()->viewCFG();
-  }
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
 
   if (SI->getNumCases() == 0) {
-    SI->removeFromParent();
+    SI->eraseFromParent();
     return;
   }
 
   if (SI->getDefaultDest() == To) {
-    dbgs() << "Swapping default case:\n\t";
-    SI->dump();
     auto FirstC = SI->case_begin();
     SI->setDefaultDest(FirstC->getCaseSuccessor());
     SI->removeCase(FirstC);
-    dbgs() << "After:\n\t";
-    SI->dump();
     return;
   }
 
