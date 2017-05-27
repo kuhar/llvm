@@ -66,6 +66,8 @@ public:
   Index getLevel(Node N) const;
   Node findNCA(Node First, Node Second) const;
 
+  bool dominates(Node Src, Node Dst) const;
+
   void insertArc(Node From, Node To);
   void deleteArc(Node From, Node To);
 
@@ -90,6 +92,8 @@ private:
   DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
   DenseMap<Node, Node> preorderParents;
+  mutable DenseMap<Node, std::pair<Index, Index>> inOutNums;
+  mutable bool isInOutValid = false;
 
   void computeReachableDominators(Node Root, Index MinLevel);
   void computeUnreachableDominators(
@@ -141,6 +145,8 @@ private:
   bool isReachableFromIDom(Node N);
   void deleteReachable(Node From, Node To);
   void deleteUnreachable(Node To);
+
+  void recomputeInOutNums() const;
 
   using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
   void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
@@ -358,11 +364,26 @@ Node NewDomTree::findNCA(Node First, Node Second) const {
   return First;
 }
 
+bool NewDomTree::dominates(Node Src, Node Dst) const {
+  if (!isInOutValid)
+    recomputeInOutNums();
+
+  const auto SrcInOutIt = inOutNums.find(Src);
+  assert(SrcInOutIt != inOutNums.end());
+  const auto DstInOutIt = inOutNums.find(Src);
+  assert(DstInOutIt != inOutNums.end());
+
+  return SrcInOutIt->second.first <= DstInOutIt->second.first &&
+         SrcInOutIt->second.second >= DstInOutIt->second.second;
+}
+
 void NewDomTree::insertArc(Node From, Node To) {
   // Source unreachable. We don't want to maintain a forest, so we ignore
   // unreachable nodes.
   if (!contains(From))
     return;
+
+  isInOutValid = false;
 
   // Connecting previously unreachable node.
   if (!contains(To))
@@ -493,6 +514,8 @@ void NewDomTree::deleteArc(Node From, Node To) {
   if (To == NCA)
     return;
 
+  isInOutValid = false;
+
   const Node IDomTo = getIDom(To);
   dbgs() << "NCA " << NCA->getName() << ", IDomTo " << IDomTo->getName()
          << "\n";
@@ -601,6 +624,38 @@ void NewDomTree::deleteUnreachable(Node To) {
   semiNCA(DFSRes, MinNode, MinLevel, PrevIDomMin);
 }
 
+void NewDomTree::recomputeInOutNums() const {
+  inOutNums.clear();
+
+  DenseMap<Node, SmallVector<Node, 8>> Children;
+  for (const auto NodeToIDom : idoms) {
+    if (NodeToIDom.first == root)
+      continue;
+
+    Children[NodeToIDom.second].push_back(NodeToIDom.first);
+  }
+
+  DenseSet<Node> Visited;
+  std::vector<Node> WorkList = {root};
+  Index nextNum = 0;
+  while (!WorkList.empty()) {
+    const Node Current = WorkList.back();
+
+    if (Visited.count(Current) != 0) {
+      WorkList.pop_back();
+      inOutNums[Current].second = nextNum++;
+      continue;
+    }
+
+    Visited.insert(Current);
+    inOutNums[Current].first = nextNum++;
+    for (const Node C : Children[Current])
+      WorkList.push_back(C);
+  }
+
+  isInOutValid = true;
+}
+
 bool NewDomTree::verifyAll() const {
   bool IsCorrect = true;
 
@@ -700,6 +755,9 @@ void NewDomTree::print(raw_ostream &OS) const {
   std::set<Node, NodeByName> ToPrint;
   ChildrenTy Children;
 
+  if (!isInOutValid)
+    recomputeInOutNums();
+
   for (const auto &NodeToIDom : idoms) {
     Children[NodeToIDom.second].push_back(NodeToIDom.first);
     ToPrint.insert(NodeToIDom.first);
@@ -713,6 +771,7 @@ void NewDomTree::print(raw_ostream &OS) const {
 
 void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
                            std::set<Node, NodeByName> &ToPrint) const {
+  assert(isInOutValid);
   ToPrint.erase(N);
   const auto LevelIt = levels.find(N);
   assert(LevelIt != levels.end());
@@ -720,8 +779,11 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
   for (Index i = 0; i <= Level; ++i)
     OS << "  ";
 
+  const auto InOutNumIt = inOutNums.find(N);
+  assert(InOutNumIt != inOutNums.end());
+
   OS << '[' << (Level + 1) << "] %" << N->getName() << " {"
-     << '_' << "}\n";
+     << InOutNumIt->second.first << ", " << InOutNumIt->second.second << "}\n";
 
   const auto ChildrenIt = Children.find(N);
   if (ChildrenIt == Children.end())
