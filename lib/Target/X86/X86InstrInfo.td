@@ -813,6 +813,8 @@ def UseAVX2      : Predicate<"Subtarget->hasAVX2() && !Subtarget->hasAVX512()">;
 def NoAVX512     : Predicate<"!Subtarget->hasAVX512()">;
 def HasCDI       : Predicate<"Subtarget->hasCDI()">,
                      AssemblerPredicate<"FeatureCDI", "AVX-512 CD ISA">;
+def HasVPOPCNTDQ : Predicate<"Subtarget->hasVPOPCNTDQ()">,
+                   AssemblerPredicate<"FeatureVPOPCNTDQ", "AVX-512 VPOPCNTDQ ISA">;
 def HasPFI       : Predicate<"Subtarget->hasPFI()">,
                      AssemblerPredicate<"FeaturePFI", "AVX-512 PF ISA">;
 def HasERI       : Predicate<"Subtarget->hasERI()">,
@@ -896,9 +898,16 @@ def KernelCode   : Predicate<"TM.getCodeModel() == CodeModel::Kernel">;
 def NearData     : Predicate<"TM.getCodeModel() == CodeModel::Small ||"
                              "TM.getCodeModel() == CodeModel::Kernel">;
 def IsNotPIC     : Predicate<"!TM.isPositionIndependent()">;
-def OptForSize   : Predicate<"Subtarget->getOptForSize()">;
-def OptForMinSize : Predicate<"Subtarget->getOptForMinSize()">;
-def OptForSpeed  : Predicate<"!Subtarget->getOptForSize()">;
+
+// We could compute these on a per-module basis but doing so requires accessing
+// the Function object through the <Target>Subtarget and objections were raised
+// to that (see post-commit review comments for r301750).
+let RecomputePerFunction = 1 in {
+  def OptForSize   : Predicate<"MF->getFunction()->optForSize()">;
+  def OptForMinSize : Predicate<"MF->getFunction()->optForMinSize()">;
+  def OptForSpeed  : Predicate<"!MF->getFunction()->optForSize()">;
+}
+
 def FastBTMem    : Predicate<"!Subtarget->isBTMemSlow()">;
 def CallImmAddr  : Predicate<"Subtarget->isLegalToCallImmediateAddr()">;
 def FavorMemIndirectCall  : Predicate<"!Subtarget->callRegIndirect()">;

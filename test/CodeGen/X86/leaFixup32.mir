@@ -1,4 +1,4 @@
-# RUN: llc -run-pass x86-fixup-LEAs -mcpu=corei7-avx -o - %s | FileCheck %s
+# RUN: llc -run-pass x86-fixup-LEAs -mtriple=i386 -verify-machineinstrs -mcpu=corei7-avx -o - %s | FileCheck %s
 --- |
   ; ModuleID = 'test/CodeGen/X86/fixup-lea.ll'
   source_filename = "test/CodeGen/X86/fixup-lea.ll"
@@ -332,6 +332,7 @@ selected:        false
 tracksRegLiveness: true
 liveins:         
   - { reg: '%eax' }
+  - { reg: '%ebx' }
   - { reg: '%ebp' }
 frameInfo:       
   isFrameAddressTaken: false
@@ -350,10 +351,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %eax, %ebp, %ebx
-    ; CHECK: %ebx = MOV32rr killed %ebp
-    ; CHECK: %ebx = ADD32rr %ebx, killed %ebp
+    ; CHECK: %ebx = MOV32rr  %ebp
+    ; CHECK: %ebx = ADD32rr %ebx, %ebp
  
-    %ebx = LEA32r killed %ebp, 1, killed %ebp, 0, _
+    %ebx = LEA32r %ebp, 1, %ebp, 0, _
     RETQ %ebx
 
 ...
@@ -385,10 +386,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %eax, %ebp, %ebx
-    ; CHECK: %ebx = LEA32r _, 1, killed %ebp, 5, _
-    ; CHECK: %ebx = ADD32rr %ebx, killed %ebp
+    ; CHECK: %ebx = LEA32r _, 1, %ebp, 5, _
+    ; CHECK: %ebx = ADD32rr %ebx, %ebp
  
-    %ebx = LEA32r killed %ebp, 1, killed %ebp, 5, _
+    %ebx = LEA32r %ebp, 1, %ebp, 5, _
     RETQ %ebx
 
 ...
@@ -420,10 +421,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %eax, %ebp, %ebx
-    ; CHECK: %ebx = LEA32r _, 4, killed %ebp, 5, _
-    ; CHECK: %ebx = ADD32rr %ebx, killed %ebp
+    ; CHECK: %ebx = LEA32r _, 4, %ebp, 5, _
+    ; CHECK: %ebx = ADD32rr %ebx, %ebp
  
-    %ebx = LEA32r killed %ebp, 4, killed %ebp, 5, _
+    %ebx = LEA32r %ebp, 4, %ebp, 5, _
     RETQ %ebx
 
 ...

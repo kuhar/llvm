@@ -1,4 +1,4 @@
-# RUN: llc -run-pass x86-fixup-LEAs -mcpu=corei7-avx -o - %s | FileCheck %s
+# RUN: llc -run-pass x86-fixup-LEAs -mtriple=x86_64-gnu-unknown -verify-machineinstrs -mcpu=corei7-avx -o - %s | FileCheck %s
 --- |
   ; ModuleID = 'lea-2.ll'
   source_filename = "lea-2.ll"
@@ -807,10 +807,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %rax, %rbp, %rbx
-    ; CHECK: %rbx = MOV64rr killed %rbp
-    ; CHECK: %rbx = ADD64rr %rbx, killed %rbp
+    ; CHECK: %rbx = MOV64rr %rbp
+    ; CHECK: %rbx = ADD64rr %rbx, %rbp
  
-    %rbx = LEA64r killed %rbp, 1, killed %rbp, 0, _
+    %rbx = LEA64r %rbp, 1, %rbp, 0, _
     RETQ %ebx
 
 ...
@@ -842,10 +842,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %rax, %rbp, %rbx
-    ; CHECK: %rbx = LEA64r _, 1, killed %rbp, 5, _
-    ; CHECK: %rbx = ADD64rr %rbx, killed %rbp
+    ; CHECK: %rbx = LEA64r _, 1,  %rbp, 5, _
+    ; CHECK: %rbx = ADD64rr %rbx, %rbp
  
-    %rbx = LEA64r killed %rbp, 1, killed %rbp, 5, _
+    %rbx = LEA64r %rbp, 1, %rbp, 5, _
     RETQ %ebx
 
 ...
@@ -877,10 +877,10 @@ frameInfo:
 body:             |
   bb.0 (%ir-block.0):
     liveins: %rax, %rbp, %rbx
-    ; CHECK: %rbx = LEA64r _, 4, killed %rbp, 5, _
-    ; CHECK: %rbx = ADD64rr %rbx, killed %rbp
+    ; CHECK: %rbx = LEA64r _, 4, %rbp, 5, _
+    ; CHECK: %rbx = ADD64rr %rbx,  %rbp
  
-    %rbx = LEA64r killed %rbp, 4, killed %rbp, 5, _
+    %rbx = LEA64r %rbp, 4,  %rbp, 5, _
     RETQ %ebx
 
 ...

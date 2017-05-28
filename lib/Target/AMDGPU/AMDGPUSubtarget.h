@@ -289,6 +289,10 @@ public:
     return getGeneration() >= GFX9;
   }
 
+  bool hasMin3Max3_16() const {
+    return getGeneration() >= GFX9;
+  }
+
   bool hasCARRY() const {
     return (getGeneration() >= EVERGREEN);
   }
@@ -410,6 +414,10 @@ public:
 
   bool hasFminFmaxLegacy() const {
     return getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS;
+  }
+
+  bool hasSDWA() const {
+    return HasSDWA;
   }
 
   /// \brief Returns the offset in bytes from the start of the input buffer
@@ -664,10 +672,6 @@ public:
 
   bool hasInv2PiInlineImm() const {
     return HasInv2PiInlineImm;
-  }
-
-  bool hasSDWA() const {
-    return HasSDWA;
   }
 
   bool hasDPP() const {

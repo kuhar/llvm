@@ -59,9 +59,6 @@ User::op_iterator CallSite::getCallee() const {
 //                            TerminatorInst Class
 //===----------------------------------------------------------------------===//
 
-// Out of line virtual method, so the vtable, etc has a home.
-TerminatorInst::~TerminatorInst() = default;
-
 unsigned TerminatorInst::getNumSuccessors() const {
   switch (getOpcode()) {
 #define HANDLE_TERM_INST(N, OPC, CLASS)                                        \
@@ -99,13 +96,6 @@ void TerminatorInst::setSuccessor(unsigned idx, BasicBlock *B) {
 }
 
 //===----------------------------------------------------------------------===//
-//                           UnaryInstruction Class
-//===----------------------------------------------------------------------===//
-
-// Out of line virtual method, so the vtable, etc has a home.
-UnaryInstruction::~UnaryInstruction() = default;
-
-//===----------------------------------------------------------------------===//
 //                              SelectInst Class
 //===----------------------------------------------------------------------===//
 
@@ -137,8 +127,6 @@ const char *SelectInst::areInvalidOperands(Value *Op0, Value *Op1, Value *Op2) {
 //===----------------------------------------------------------------------===//
 //                               PHINode Class
 //===----------------------------------------------------------------------===//
-
-void PHINode::anchor() {}
 
 PHINode::PHINode(const PHINode &PN)
     : Instruction(PN.getType(), Instruction::PHI, nullptr, PN.getNumOperands()),
@@ -292,8 +280,6 @@ void LandingPadInst::addClause(Constant *Val) {
 //===----------------------------------------------------------------------===//
 //                        CallInst Implementation
 //===----------------------------------------------------------------------===//
-
-CallInst::~CallInst() = default;
 
 void CallInst::init(FunctionType *FTy, Value *Func, ArrayRef<Value *> Args,
                     ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr) {
@@ -467,6 +453,9 @@ bool CallInst::dataOperandHasImpliedAttr(unsigned i,
   // The attribute A can either be directly specified, if the operand in
   // question is a call argument; or be indirectly implied by the kind of its
   // containing operand bundle, if the operand is a bundle operand.
+
+  if (i == AttributeList::ReturnIndex)
+    return hasRetAttr(Kind);
 
   // FIXME: Avoid these i - 1 calculations and update the API to use zero-based
   // indices.
@@ -793,6 +782,9 @@ bool InvokeInst::dataOperandHasImpliedAttr(unsigned i,
   // question is an invoke argument; or be indirectly implied by the kind of its
   // containing operand bundle, if the operand is a bundle operand.
 
+  if (i == AttributeList::ReturnIndex)
+    return hasRetAttr(Kind);
+
   // FIXME: Avoid these i - 1 calculations and update the API to use zero-based
   // indices.
   if (i < (getNumArgOperands() + 1))
@@ -899,8 +891,6 @@ void ReturnInst::setSuccessorV(unsigned idx, BasicBlock *NewSucc) {
 BasicBlock *ReturnInst::getSuccessorV(unsigned idx) const {
   llvm_unreachable("ReturnInst has no successors!");
 }
-
-ReturnInst::~ReturnInst() = default;
 
 //===----------------------------------------------------------------------===//
 //                        ResumeInst Implementation
@@ -1337,9 +1327,6 @@ AllocaInst::AllocaInst(Type *Ty, unsigned AddrSpace, Value *ArraySize,
   setName(Name);
 }
 
-// Out of line virtual method, so the vtable, etc has a home.
-AllocaInst::~AllocaInst() = default;
-
 void AllocaInst::setAlignment(unsigned Align) {
   assert((Align & (Align-1)) == 0 && "Alignment is not a power of 2!");
   assert(Align <= MaximumAlignment &&
@@ -1688,8 +1675,6 @@ FenceInst::FenceInst(LLVMContext &C, AtomicOrdering Ordering,
 //===----------------------------------------------------------------------===//
 //                       GetElementPtrInst Implementation
 //===----------------------------------------------------------------------===//
-
-void GetElementPtrInst::anchor() {}
 
 void GetElementPtrInst::init(Value *Ptr, ArrayRef<Value *> IdxList,
                              const Twine &Name) {
@@ -2356,8 +2341,6 @@ float FPMathOperator::getFPAccuracy() const {
 //===----------------------------------------------------------------------===//
 //                                CastInst Class
 //===----------------------------------------------------------------------===//
-
-void CastInst::anchor() {}
 
 // Just determine if this cast only deals with integral->integral conversion.
 bool CastInst::isIntegerCast() const {
@@ -3387,8 +3370,6 @@ AddrSpaceCastInst::AddrSpaceCastInst(
 //                               CmpInst Classes
 //===----------------------------------------------------------------------===//
 
-void CmpInst::anchor() {}
-
 CmpInst::CmpInst(Type *ty, OtherOps op, Predicate predicate, Value *LHS,
                  Value *RHS, const Twine &Name, Instruction *InsertBefore)
   : Instruction(ty, op,
@@ -3527,8 +3508,6 @@ StringRef CmpInst::getPredicateName(Predicate Pred) {
   case ICmpInst::ICMP_ULE:   return "ule";
   }
 }
-
-void ICmpInst::anchor() {}
 
 ICmpInst::Predicate ICmpInst::getSignedPredicate(Predicate pred) {
   switch (pred) {
