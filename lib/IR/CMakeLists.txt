@@ -20,6 +20,7 @@ add_llvm_library(LLVMCore
   DiagnosticInfo.cpp
   DiagnosticPrinter.cpp
   Dominators.cpp
+  DomSupport.cpp
   Function.cpp
   GCOV.cpp
   GVMaterializer.cpp
