@@ -38,6 +38,7 @@ add_llvm_library(LLVMCore
   Metadata.cpp
   Module.cpp
   ModuleSummaryIndex.cpp
+  NewDominators.cpp
   Operator.cpp
   OptBisect.cpp
   Pass.cpp
