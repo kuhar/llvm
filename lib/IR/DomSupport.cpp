@@ -10,16 +10,8 @@
 #include "llvm/IR/DomSupport.h"
 
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/TypeBuilder.h"
-
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -97,21 +89,49 @@ BasicBlock *InputGraph::toCFG() {
     }
 
   for (const auto &A : arcs)
-    connect(Blocks[A.first - 1], Blocks[A.second - 1]);
+    llvm::connect(Blocks[A.first - 1], Blocks[A.second - 1]);
 
   return EntryBB;
 }
 
-Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate() {
+bool InputGraph::connect(const Arc &A) {
+  if (std::find(arcs.begin(), arcs.end(), A) != arcs.end())
+    return false;
+
+  arcs.push_back(A);
+  return true;
+}
+
+bool InputGraph::disconnect(const Arc &A) {
+  auto it = std::find(arcs.begin(), arcs.end(), A);
+  if (it == arcs.end())
+    return false;
+
+  std::swap(*it, arcs.back());
+  arcs.pop_back();
+  return true;
+}
+
+Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
+                                                                 /* = true */) {
   if (updateIdx == updates.size())
     return None;
 
   auto Next = updates[updateIdx++];
+  bool Updated = false;
+  if (Next.action == Op::Insert && connect(Next.arc))
+    Updated = true;
+  else if (disconnect(Next.arc))
+    Updated = true;
+
+  if (!Updated || !UpdateIR)
+    return None;
+
   auto A = cfg->getArc(Next.arc);
-  if (Next.action == InputGraph::Op::Insert)
-    connect(A.first, A.second);
+  if (Next.action == Op::Insert)
+    llvm::connect(A.first, A.second);
   else
-    disconnect(A.first, A.second);
+    llvm::disconnect(A.first, A.second);
 
   return CFGUpdate{Next.action, A};
 }
@@ -166,4 +186,24 @@ Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
   }
 
   return std::move(Graph);
+}
+
+void InputGraph::printCurrent(raw_ostream &Out) const {
+  Out << nodesNum << arcs.size() << entry << 1 << '\n';
+
+  for (const auto &A : arcs)
+    Out << "a " << A.first << " " << A.second << '\n';
+
+  Out << "e\n";
+}
+
+void InputGraph::dump(raw_ostream &OS) const {
+  OS << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\nArcs:\n";
+  for (const auto &A : arcs)
+    OS << A.first << "\t->\t" << A.second << "\n";
+
+  OS << "Updates:\n";
+  for (const auto &U : updates)
+    OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first
+       << "\t->\t" << U.arc.second << "\n";
 }

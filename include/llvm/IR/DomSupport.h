@@ -58,17 +58,8 @@ struct InputGraph {
 
   static Optional<InputGraph> readFromFile(const std::string& filename);
 
-  void dump(raw_ostream &OS = dbgs()) {
-    OS << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\nArcs:\n";
-    for (const auto &A : arcs)
-      OS << A.first << "\t->\t" << A.second << "\n";
-
-    OS << "Updates:\n";
-    for (const auto &U : updates)
-      OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first
-         << "\t->\t" << U.arc.second << "\n";
-  }
-
+  void dump(raw_ostream &OS = dbgs()) const;
+  void printCurrent(raw_ostream &Out) const;
   // Returns entry/root;
   BasicBlock *toCFG();
 
@@ -77,7 +68,11 @@ struct InputGraph {
     Op action;
     CFGArc arc;
   };
-  Optional<CFGUpdate> applyUpdate();
+  Optional<CFGUpdate> applyUpdate(bool UpdateIR = true);
+
+private:
+  bool connect(const Arc& A);
+  bool disconnect(const Arc& A);
 };
 
 void connect(BasicBlock *From, BasicBlock *To);
