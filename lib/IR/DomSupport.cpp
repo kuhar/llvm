@@ -68,7 +68,9 @@ BasicBlock *InputGraph::toCFG() {
   std::vector<BasicBlock *> Blocks(nodesNum);
 
   auto MakeBB = [&](StringRef name) -> BasicBlock * {
-    return BasicBlock::Create(CFG.context, name, CFG.function);
+    auto *BB = BasicBlock::Create(CFG.context, name, CFG.function);
+    IRBuilder<> IRB(BB); // FIXME: Call abort not to crash llvm-as / llvm-dis.
+    return BB;
   };
 
   auto MakeName = [](StringRef prefix, unsigned num) {
@@ -124,8 +126,11 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
   else if (disconnect(Next.arc))
     Updated = true;
 
-  if (!Updated || !UpdateIR)
+  if (!Updated)
     return None;
+
+  if (!UpdateIR) // FIXME: Remove API hack when not updating IR...
+    return CFGUpdate{Next.action, {nullptr, nullptr}};
 
   auto A = cfg->getArc(Next.arc);
   if (Next.action == Op::Insert)
@@ -189,7 +194,7 @@ Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
 }
 
 void InputGraph::printCurrent(raw_ostream &Out) const {
-  Out << nodesNum << arcs.size() << entry << 1 << '\n';
+  Out << nodesNum << ' ' << arcs.size() << ' ' << entry << ' ' << 1 << '\n';
 
   for (const auto &A : arcs)
     Out << "a " << A.first << " " << A.second << '\n';

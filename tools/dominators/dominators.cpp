@@ -9,6 +9,7 @@
 
 #include "llvm/IR/DomSupport.h"
 
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -37,39 +38,35 @@ static cl::opt<bool> ViewCFG("view-cfg", cl::desc("View CFG"));
 
 enum class InputKind { IR, Graph };
 
-bool isGraphFile(StringRef Filename) {
+static bool isGraphFile(StringRef Filename) {
   return Filename.endswith(".txt");
 }
 
-bool isBitcodeFile(StringRef Filename) {
-  return Filename.endswith(".bc");
-}
-
-bool isIRFile(StringRef Filename) {
+static bool isIRFile(StringRef Filename) {
   return Filename.endswith(".ll");
 }
 
-void updateGraph(InputGraph& IG) {
-  unsigned UpdatesRequestes = 0;
+static void updateGraph(InputGraph& IG, bool UpdateIR) {
+  unsigned UpdatesRequested = 0;
   if (ApplyAll)
-    UpdatesRequestes = static_cast<unsigned>(-1);
+    UpdatesRequested = static_cast<unsigned>(-1);
   else
-    UpdatesRequestes = ApplyUpdates.getValue();
+    UpdatesRequested = ApplyUpdates.getValue();
 
   Optional<InputGraph::CFGUpdate> Update;
   unsigned UpdatesPerformed = 0;
-  while (UpdatesPerformed < UpdatesRequestes &&
-         (Update = IG.applyUpdate(false)))
+  while (UpdatesPerformed < UpdatesRequested &&
+         (Update = IG.applyUpdate(UpdateIR)))
     ++UpdatesPerformed;
 
-  if (UpdatesPerformed < UpdatesRequestes)
-    dbgs() << "Requested " << UpdatesRequestes << " updates, performed only "
+  if (UpdatesPerformed < UpdatesRequested)
+    dbgs() << "Requested " << UpdatesRequested << " updates, performed only "
            << UpdatesPerformed << "\n";
 
-  assert(UpdatesPerformed <= UpdatesRequestes);
+  assert(UpdatesPerformed <= UpdatesRequested);
 }
 
-std::error_code outputGraph(InputGraph &IG) {
+static std::error_code outputGraph(InputGraph &IG) {
   if (OutputFile.empty()) {
     IG.printCurrent(outs());
     return {};
@@ -84,23 +81,40 @@ std::error_code outputGraph(InputGraph &IG) {
   return {};
 }
 
-Optional<InputGraph> readGraph() {
+static std::error_code outputIR(InputGraph &IG) {
+  if (OutputFile.empty()) {
+    IG.cfg->module.print(outs(), nullptr);
+    return {};
+  }
+
+  std::error_code EC;
+  raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
+  if (EC)
+    return EC;
+
+  if (isIRFile(OutputFile)) {
+    IG.cfg->module.print(Out, nullptr);
+    return {};
+  }
+
+  WriteBitcodeToFile(&IG.cfg->module, Out);
+  IG.cfg->module.dump();
+  return {};
+}
+
+static Optional<InputGraph> readGraph() {
   return InputGraph::readFromFile(InputFile);
 }
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  cl::ParseCommandLineOptions(argc, argv, "dominators");
-
+static bool validateConsoleFlags() {
   if (InputFile.empty()) {
     errs() << "No input file\n";
-    return 1;
+    return false;
   }
 
   if (ToGraph && ToIR) {
     errs() << "Two output type not allowed\n";
-    return 1;
+    return false;
   }
 
   const InputKind Kind = isGraphFile(InputFile) ? InputKind::Graph
@@ -108,14 +122,25 @@ int main(int argc, char **argv) {
 
   if (ToGraph && Kind == InputKind::Graph && !ApplyUpdates && !ApplyAll) {
     errs() << "Input and output kinds are the same (graph), but there are " <<
-              "no updates to apply\n";
-    return 1;
+           "no updates to apply\n";
+    return false;
   }
 
   if (ApplyAll && ApplyUpdates) {
     errs() << "To many update flags\n";
-    return 1;
+    return false;
   }
+
+  return true;
+}
+
+int main(int argc, char **argv) {
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
+  PrettyStackTraceProgram X(argc, argv);
+  cl::ParseCommandLineOptions(argc, argv, "dominators");
+
+  if (!validateConsoleFlags())
+    return 1;
 
   auto Graph = readGraph();
   if (!Graph) {
@@ -127,8 +152,8 @@ int main(int argc, char **argv) {
   Graph->dump();
 
   if (ToGraph) {
-    updateGraph(*Graph);
-    auto EC = outputGraph(*Graph);
+    updateGraph(*Graph, false);
+    const auto EC = outputGraph(*Graph);
     if (EC) {
       errs() << "Could not output graph: " << EC.message() << '\n';
       return 1;
@@ -138,6 +163,16 @@ int main(int argc, char **argv) {
   }
 
   auto *RootBB = Graph->toCFG();
+
+  if (ToIR) {
+    auto EC = outputIR(*Graph);
+    if (EC) {
+      errs() << "Could not output IR: " << EC.message() << '\n';
+      return 1;
+    }
+
+    return 0;
+  }
 
   dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 
