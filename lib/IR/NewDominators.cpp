@@ -24,6 +24,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "new-dom-tree"
+
 bool VerifyNewDomInfo = true;
 
 static cl::opt<bool,true>
@@ -38,9 +40,9 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   DenseMap<Node, Node> Label;
   DenseMap<Node, Node> SDoms;
   const Index LastNum = DFS.nextDFSNum - 1;
-  dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n";
-  dbgs() << "LastNum: " << LastNum << ": " << DFS.numToNode[LastNum]->getName()
-         << "\n";
+  DEBUG(dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n");
+  DEBUG(dbgs() << "LastNum: " << LastNum << ": "
+               << DFS.numToNode[LastNum]->getName() << "\n");
 
   // Step 0: initialize data structures.
   for (Index i = 0; i <= LastNum; ++i) {
@@ -236,20 +238,20 @@ void NewDomTree::insertArc(Node From, Node To) {
     insertReachable(From, To);
 
   if (VerifyNewDomInfo && !verifyAll())
-    dbgs() << "Verification after insertion failed!\n";
+    DEBUG(dbgs() << "Verification after insertion failed!\n");
 }
 
 void NewDomTree::insertUnreachable(Node From, Node To) {
   assert(!contains(To));
-  dbgs() << "Inserting " << From->getName() << " -> (unreachable) "
-         << To->getName() << "\n";
+  DEBUG(dbgs() << "Inserting " << From->getName() << " -> (unreachable) "
+               << To->getName() << "\n");
 
   SmallVector<std::pair<Node, Node>, 8> DiscoveredArcsToReachable;
   computeUnreachableDominators(To, From, DiscoveredArcsToReachable);
 
-  dbgs() << "Inserted " << From->getName() << " -> (prev unreachable) "
-         << To->getName() << "\n";
-  dumpLevels();
+  DEBUG(dbgs() << "Inserted " << From->getName() << " -> (prev unreachable) "
+               << To->getName() << "\n");
+  DEBUG(dumpLevels());
 
   for (const auto &A : DiscoveredArcsToReachable)
     insertReachable(A.first, A.second);
@@ -260,58 +262,60 @@ void NewDomTree::insertReachable(Node From, Node To) {
   const Node NCA = findNCA(From, To);
   const Node ToIDom = getIDom(To);
 
-  dbgs() << "Inserting a reachable arc: " << From->getName() << " -> "
-         << To->getName() << "\n";
+  DEBUG(dbgs() << "Inserting a reachable arc: " << From->getName() << " -> "
+               << To->getName() << "\n");
 
   // Nothing affected.
   if (NCA == To || NCA == ToIDom)
     return;
 
-  dbgs() << "Marking " << To->getName() << " affected\n";
+  DEBUG(dbgs() << "Marking " << To->getName() << " affected\n");
   II.affected.insert(To);
   const Index ToLevel = getLevel(To);
-  dbgs() << "Putting " << To->getName() << " into bucket\n";
+  DEBUG(dbgs() << "Putting " << To->getName() << " into bucket\n");
   II.bucket.push({ToLevel, To});
 
   while (!II.bucket.empty()) {
     const Node CurrentNode = II.bucket.top().second;
     II.bucket.pop();
-    dbgs() << "\tAdding to visited and AQ: " << CurrentNode->getName() << "\n";
+    DEBUG(dbgs() << "\tAdding to visited and AQ: " << CurrentNode->getName()
+                 << "\n");
     II.visited.insert(CurrentNode);
     II.affectedQueue.push_back(CurrentNode);
 
     visitInsertion(CurrentNode, getLevel(CurrentNode), NCA, II);
   }
 
-  dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName()
-         << "\n";
+  DEBUG(dbgs() << "IR: Almost end, entering update with NCA " << NCA->getName()
+               << "\n");
   updateInsertion(NCA, II);
 
-  dbgs() << "Clearing stuff\n";
+  DEBUG(dbgs() << "Clearing stuff\n");
 }
 
 void NewDomTree::visitInsertion(Node N, Index RootLevel, Node NCA,
                                 InsertionInfo &II) {
   const Index NCALevel = getLevel(NCA);
-  dbgs() << "Visiting " << N->getName() << "\n";
+  DEBUG(dbgs() << "Visiting " << N->getName() << "\n");
 
   for (const auto Succ : successors(N)) {
     const Index SuccLevel = getLevel(Succ);
-    dbgs() << "\tSuccessor " << Succ->getName() << ", level = " << SuccLevel
-           << "\n";
+    DEBUG(dbgs() << "\tSuccessor " << Succ->getName() << ", level = "
+              << SuccLevel << "\n");
     // Succ dominated by subtree root -- not affected.
     if (SuccLevel > RootLevel) {
-      dbgs() << "\t\tdominated by subtree root\n";
+      DEBUG(dbgs() << "\t\tdominated by subtree root\n");
       if (II.visited.count(Succ) != 0)
         continue;
 
-      dbgs() << "\t\tMarking visited not affected " << Succ->getName() << "\n";
+      DEBUG(dbgs() << "\t\tMarking visited not affected " << Succ->getName()
+                   << "\n");
       II.visited.insert(Succ);
       II.visitedNotAffectedQueue.push_back(Succ);
       visitInsertion(Succ, RootLevel, NCA, II);
     } else if ((SuccLevel > NCALevel + 1) && II.affected.count(Succ) == 0) {
-      dbgs() << "\t\tMarking affected and adding to bucket " << Succ->getName()
-             << "\n";
+      DEBUG(dbgs() << "\t\tMarking affected and adding to bucket "
+                << Succ->getName() << "\n");
       II.affected.insert(Succ);
       II.bucket.push({SuccLevel, Succ});
     }
@@ -319,35 +323,37 @@ void NewDomTree::visitInsertion(Node N, Index RootLevel, Node NCA,
 }
 
 void NewDomTree::updateInsertion(Node NCA, InsertionInfo &II) {
-  dbgs() << "Updating NCA = " << NCA->getName() << "\n";
+  DEBUG(dbgs() << "Updating NCA = " << NCA->getName() << "\n");
   // Update idoms and start updating levels.
   for (const Node N : II.affectedQueue) {
-    dbgs() << "\tidoms[" << N->getName() << "] = " << NCA->getName() << "\n";
+    DEBUG(dbgs() << "\tidoms[" << N->getName() << "] = " << NCA->getName()
+                 << "\n");
     idoms[N] = NCA;
-    dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA] << " + 1\n";
+    DEBUG(dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA]
+                 << " + 1\n");
     levels[N] = levels[NCA] + 1;
 
     assert(preorderParents.count(N) != 0);
     preorderParents.erase(N);
   }
 
-  dbgs() << "Before updating levels\n";
+  DEBUG(dbgs() << "Before updating levels\n");
   updateLevels(II);
 }
 
 void NewDomTree::updateLevels(InsertionInfo &II) {
-  dbgs() << "Updating levels\n";
+  DEBUG(dbgs() << "Updating levels\n");
   // Update levels of visited but not affected nodes;
   for (const Node N : II.visitedNotAffectedQueue) {
-    dbgs() << "\tlevels[" << N->getName() << "] = levels["
-           << idoms[N]->getName() << "] + 1\n";
+    DEBUG(dbgs() << "\tlevels[" << N->getName() << "] = levels["
+                 << idoms[N]->getName() << "] + 1\n");
     levels[N] = levels[idoms[N]] + 1;
   }
 }
 
 void NewDomTree::deleteArc(Node From, Node To) {
-  dbgs() << "Deleting arc " << From->getName() << " -> " << To->getName()
-         << "\n";
+  DEBUG(dbgs() << "Deleting arc " << From->getName() << " -> " << To->getName()
+               << "\n");
   // Deletion in unreachable subtree -- nothing to do.
   if (!contains(From))
     return;
@@ -361,8 +367,8 @@ void NewDomTree::deleteArc(Node From, Node To) {
   isInOutValid = false;
 
   const Node IDomTo = getIDom(To);
-  dbgs() << "NCA " << NCA->getName() << ", IDomTo " << IDomTo->getName()
-         << "\n";
+  DEBUG(dbgs() << "NCA " << NCA->getName() << ", IDomTo " << IDomTo->getName()
+               << "\n");
 
   // To stays reachable.
   if (From != IDomTo || isReachableFromIDom(To))
@@ -371,7 +377,7 @@ void NewDomTree::deleteArc(Node From, Node To) {
     deleteUnreachable(To);
 
   if (VerifyNewDomInfo && !verifyAll())
-    dbgs() << "Verification after deletion failed!\n";
+    DEBUG(dbgs() << "Verification after deletion failed!\n");
 }
 
 bool NewDomTree::isReachableFromIDom(Node N) {
@@ -382,8 +388,8 @@ bool NewDomTree::isReachableFromIDom(Node N) {
 
     const Node Support = findNCA(N, Succ);
     if (Support != N) {
-      dbgs() << "\tIsReachable " << N->getName() << " from support = "
-             << Succ->getName() << "\n";
+      DEBUG(dbgs() << "\tIsReachable " << N->getName() << " from support = "
+                   << Succ->getName() << "\n");
       return true;
     }
   }

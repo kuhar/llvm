@@ -18,16 +18,22 @@
 #include <fstream>
 #include <sstream>
 
+#define DEBUG_TYPE "dom-support"
+
 using namespace llvm;
 
 void llvm::connect(BasicBlock *From, BasicBlock *To) {
   auto *IntTy =
       IntegerType::get(From->getParent()->getParent()->getContext(), 32);
+
+  if (isa<UnreachableInst>(From->getTerminator()))
+    From->getTerminator()->eraseFromParent();
   if (!From->getTerminator()) {
     IRBuilder<> IRB(From);
     IRB.CreateSwitch(ConstantInt::get(IntTy, 0), To);
     return;
   }
+
 
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
   const auto Last = SI->getNumCases();
@@ -37,13 +43,15 @@ void llvm::connect(BasicBlock *From, BasicBlock *To) {
 }
 
 void llvm::disconnect(BasicBlock *From, BasicBlock *To) {
-  dbgs() << "Deleting BB arc " << From->getName() << " -> "
+  DEBUG(dbgs() << "Deleting BB arc " << From->getName() << " -> "
          << To->getName() << "\n";
-  dbgs().flush();
+  dbgs().flush());
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
 
   if (SI->getNumCases() == 0) {
     SI->eraseFromParent();
+    IRBuilder<> IRB(From);
+    IRB.CreateUnreachable();
     return;
   }
 
@@ -69,7 +77,8 @@ BasicBlock *InputGraph::toCFG() {
 
   auto MakeBB = [&](StringRef name) -> BasicBlock * {
     auto *BB = BasicBlock::Create(CFG.context, name, CFG.function);
-    IRBuilder<> IRB(BB); // FIXME: Call abort not to crash llvm-as / llvm-dis.
+    IRBuilder<> IRB(BB);
+    IRB.CreateUnreachable();
     return BB;
   };
 
@@ -142,7 +151,7 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
 }
 
 Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
-  dbgs() << "Reading input graph: " << filename << "\n";
+  DEBUG(dbgs() << "Reading input graph: " << filename << "\n");
   std::ifstream IFS(filename);
   dbgs() << IFS.good() << "\n";
   InputGraph Graph;
