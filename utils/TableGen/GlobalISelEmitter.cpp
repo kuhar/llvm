@@ -118,7 +118,7 @@ static std::string explainPredicates(const TreePatternNode *N) {
 
 std::string explainOperator(Record *Operator) {
   if (Operator->isSubClassOf("SDNode"))
-    return " (" + Operator->getValueAsString("Opcode") + ")";
+    return (" (" + Operator->getValueAsString("Opcode") + ")").str();
 
   if (Operator->isSubClassOf("Intrinsic"))
     return (" (Operator is an Intrinsic, " + Operator->getName() + ")").str();
@@ -1602,7 +1602,7 @@ Expected<BuildMIAction &> GlobalISelEmitter::createAndImportInstructionRenderer(
 
 Error GlobalISelEmitter::importDefaultOperandRenderers(
     BuildMIAction &DstMIBuilder, DagInit *DefaultOps) const {
-  for (const auto *DefaultOp : DefaultOps->args()) {
+  for (const auto *DefaultOp : DefaultOps->getArgs()) {
     // Look through ValueType operators.
     if (const DagInit *DefaultDagOp = dyn_cast<DagInit>(DefaultOp)) {
       if (const DefInit *DefaultDagOperator =

@@ -12777,10 +12777,10 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
     }
 
     // If we have load/store pair instructions and we only have two values,
-    // don't bother.
+    // don't bother merging.
     unsigned RequiredAlignment;
     if (LoadNodes.size() == 2 && TLI.hasPairedLoad(MemVT, RequiredAlignment) &&
-        St->getAlignment() >= RequiredAlignment) {
+        StoreNodes[0].MemNode->getAlignment() >= RequiredAlignment) {
       StoreNodes.erase(StoreNodes.begin(), StoreNodes.begin() + 2);
       continue;
     }
@@ -14567,7 +14567,8 @@ static SDValue narrowExtractedVectorLoad(SDNode *Extract, SelectionDAG &DAG) {
   // extract instead or remove that condition entirely.
   auto *Ld = dyn_cast<LoadSDNode>(Extract->getOperand(0));
   auto *ExtIdx = dyn_cast<ConstantSDNode>(Extract->getOperand(1));
-  if (!Ld || !Ld->hasOneUse() || Ld->isVolatile() || !ExtIdx)
+  if (!Ld || !Ld->hasOneUse() || Ld->getExtensionType() || Ld->isVolatile() ||
+      !ExtIdx)
     return SDValue();
 
   // The narrow load will be offset from the base address of the old load if

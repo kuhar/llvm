@@ -1189,6 +1189,9 @@ public:
     return Init ? Init->getValue() : StringRef();
   }
 
+  ArrayRef<Init *> getArgs() const {
+    return makeArrayRef(getTrailingObjects<Init *>(), NumArgs);
+  }
   ArrayRef<StringInit *> getArgNames() const {
     return makeArrayRef(getTrailingObjects<StringInit *>(), NumArgNames);
   }
@@ -1200,19 +1203,16 @@ public:
   typedef SmallVectorImpl<Init*>::const_iterator       const_arg_iterator;
   typedef SmallVectorImpl<StringInit*>::const_iterator const_name_iterator;
 
-  inline const_arg_iterator  arg_begin() const { return getTrailingObjects<Init *>(); }
-  inline const_arg_iterator  arg_end  () const { return arg_begin() + NumArgs;   }
-  inline iterator_range<const_arg_iterator> args() const {
-    return llvm::make_range(arg_begin(), arg_end());
-  }
+  inline const_arg_iterator  arg_begin() const { return getArgs().begin(); }
+  inline const_arg_iterator  arg_end  () const { return getArgs().end(); }
 
-  inline size_t              arg_size () const { return NumArgs;  }
+  inline size_t              arg_size () const { return NumArgs; }
   inline bool                arg_empty() const { return NumArgs == 0; }
 
-  inline const_name_iterator name_begin() const { return getTrailingObjects<StringInit *>(); }
-  inline const_name_iterator name_end  () const { return name_begin() + NumArgNames;   }
+  inline const_name_iterator name_begin() const { return getArgNames().begin();}
+  inline const_name_iterator name_end  () const { return getArgNames().end(); }
 
-  inline size_t              name_size () const { return NumArgNames;  }
+  inline size_t              name_size () const { return NumArgNames; }
   inline bool                name_empty() const { return NumArgNames == 0; }
 
   Init *getBit(unsigned Bit) const override {
@@ -1237,7 +1237,8 @@ class RecordVal {
 
 public:
   RecordVal(Init *N, RecTy *T, bool P);
-  RecordVal(StringRef N, RecTy *T, bool P);
+  RecordVal(StringRef N, RecTy *T, bool P)
+    : RecordVal(StringInit::get(N), T, P) {}
 
   StringRef getName() const;
   Init *getNameInit() const { return Name; }
@@ -1378,13 +1379,11 @@ public:
   }
 
   RecordVal *getValue(const Init *Name) {
-    for (RecordVal &Val : Values)
-      if (Val.Name == Name) return &Val;
-    return nullptr;
+    return const_cast<RecordVal *>(static_cast<const Record *>(this)->getValue(Name));
   }
 
   RecordVal *getValue(StringRef Name) {
-    return getValue(StringInit::get(Name));
+    return const_cast<RecordVal *>(static_cast<const Record *>(this)->getValue(Name));
   }
 
   void addTemplateArg(Init *Name) {
@@ -1492,7 +1491,7 @@ public:
   /// its value as a string, throwing an exception if the field does not exist
   /// or if the value is not a string.
   ///
-  std::string getValueAsString(StringRef FieldName) const;
+  StringRef getValueAsString(StringRef FieldName) const;
 
   /// This method looks up the specified field and returns
   /// its value as a BitsInit, throwing an exception if the field does not exist
@@ -1522,7 +1521,7 @@ public:
   /// returns its value as a vector of strings, throwing an exception if the
   /// field does not exist or if the value is not the right type.
   ///
-  std::vector<std::string> getValueAsListOfStrings(StringRef FieldName) const;
+  std::vector<StringRef> getValueAsListOfStrings(StringRef FieldName) const;
 
   /// This method looks up the specified field and returns its
   /// value as a Record, throwing an exception if the field does not exist or if

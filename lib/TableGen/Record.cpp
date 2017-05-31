@@ -405,27 +405,21 @@ IntInit::convertInitializerBitRange(ArrayRef<unsigned> Bits) const {
 }
 
 CodeInit *CodeInit::get(StringRef V) {
-  static DenseMap<StringRef, CodeInit*> ThePool;
+  static StringMap<CodeInit*, BumpPtrAllocator &> ThePool(Allocator);
 
-  auto I = ThePool.insert(std::make_pair(V, nullptr));
-  if (I.second) {
-    StringRef VCopy = V.copy(Allocator);
-    I.first->first = VCopy;
-    I.first->second = new(Allocator) CodeInit(VCopy);
-  }
-  return I.first->second;
+  auto &Entry = *ThePool.insert(std::make_pair(V, nullptr)).first;
+  if (!Entry.second)
+    Entry.second = new(Allocator) CodeInit(Entry.getKey());
+  return Entry.second;
 }
 
 StringInit *StringInit::get(StringRef V) {
-  static DenseMap<StringRef, StringInit*> ThePool;
+  static StringMap<StringInit*, BumpPtrAllocator &> ThePool(Allocator);
 
-  auto I = ThePool.insert(std::make_pair(V, nullptr));
-  if (I.second) {
-    StringRef VCopy = V.copy(Allocator);
-    I.first->first = VCopy;
-    I.first->second = new(Allocator) StringInit(VCopy);
-  }
-  return I.first->second;
+  auto &Entry = *ThePool.insert(std::make_pair(V, nullptr)).first;
+  if (!Entry.second)
+    Entry.second = new(Allocator) StringInit(Entry.getKey());
+  return Entry.second;
 }
 
 Init *StringInit::convertInitializerTo(RecTy *Ty) const {
@@ -1540,7 +1534,7 @@ Init *DagInit::resolveReferences(Record &R, const RecordVal *RV) const {
   SmallVector<Init*, 8> NewArgs;
   NewArgs.reserve(arg_size());
   bool ArgsChanged = false;
-  for (const Init *Arg : args()) {
+  for (const Init *Arg : getArgs()) {
     Init *NewArg = Arg->resolveReferences(R, RV);
     NewArgs.push_back(NewArg);
     ArgsChanged |= NewArg != Arg;
@@ -1574,12 +1568,6 @@ std::string DagInit::getAsString() const {
 
 RecordVal::RecordVal(Init *N, RecTy *T, bool P)
   : Name(N), TyAndPrefix(T, P) {
-  Value = UnsetInit::get()->convertInitializerTo(T);
-  assert(Value && "Cannot create unset value for current type!");
-}
-
-RecordVal::RecordVal(StringRef N, RecTy *T, bool P)
-  : Name(StringInit::get(N)), TyAndPrefix(T, P) {
   Value = UnsetInit::get()->convertInitializerTo(T);
   assert(Value && "Cannot create unset value for current type!");
 }
@@ -1720,7 +1708,7 @@ Init *Record::getValueInit(StringRef FieldName) const {
   return R->getValue();
 }
 
-std::string Record::getValueAsString(StringRef FieldName) const {
+StringRef Record::getValueAsString(StringRef FieldName) const {
   const RecordVal *R = getValue(FieldName);
   if (!R || !R->getValue())
     PrintFatalError(getLoc(), "Record `" + getName() +
@@ -1799,10 +1787,10 @@ Record::getValueAsListOfInts(StringRef FieldName) const {
   return Ints;
 }
 
-std::vector<std::string>
+std::vector<StringRef>
 Record::getValueAsListOfStrings(StringRef FieldName) const {
   ListInit *List = getValueAsListInit(FieldName);
-  std::vector<std::string> Strings;
+  std::vector<StringRef> Strings;
   for (Init *I : List->getValues()) {
     if (StringInit *SI = dyn_cast<StringInit>(I))
       Strings.push_back(SI->getValue());
