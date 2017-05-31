@@ -50,29 +50,30 @@ static std::unique_ptr<Module> GetModule(StringRef Filename) {
 }
 
 template <typename F>
-std::chrono::milliseconds Time(StringRef Desc, F Fun, int No = -1,
+std::chrono::microseconds Time(StringRef Desc, F Fun, int No = -1,
                                int Total = -1) {
   const auto StartTime = std::chrono::steady_clock::now();
   Fun();
   const auto EndTime = std::chrono::steady_clock::now();
-  const auto ElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+  const auto ElapsedMs = std::chrono::duration_cast<std::chrono::microseconds>(
       EndTime - StartTime);
 
-  std::string Buff;
-  raw_string_ostream RSO(Buff);
-  if (No != -1) RSO << '[' << No << '/' << Total << "]\t";
-
-  RSO << Desc << ": " << ElapsedMs.count() << " ms\n";
-
+  if (Progress) {
+    std::string Buff;
+    raw_string_ostream RSO(Buff);
+    RSO << '[' << No << '/' << Total << "]\t";
+    RSO << Desc << ": " << ElapsedMs.count() << " us\n";
+    RSO.flush();
+    outs() << Buff;
+  }
   return ElapsedMs;
 };
 
 static void RunOld(Module &M) {
   const int NumFun = M.getFunctionList().size();
   int current = -1;
-  std::chrono::milliseconds TotalElapsed{0};
+  std::chrono::microseconds TotalElapsed{0};
   for (auto &F : M.getFunctionList()) {
-    if (Progress) ++current;
     if (F.getBasicBlockList().empty())
       continue;
 
@@ -83,7 +84,7 @@ static void RunOld(Module &M) {
                            DominatorTree DT(F);
                            TouchNOP(&DT);
                          },
-                         current, NumFun);
+                         ++current, NumFun);
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n Old DT: Total time\t"
@@ -93,23 +94,23 @@ static void RunOld(Module &M) {
 static void RunNew(Module &M) {
   const int NumFun = M.getFunctionList().size();
   int current = -1;
-  std::chrono::milliseconds TotalElapsed{0};
+  std::chrono::microseconds TotalElapsed{0};
   for (auto &F : M.getFunctionList()) {
-    if (Progress) ++current;
     if (F.getBasicBlockList().empty())
       continue;
 
     DEBUG(dbgs() << F.getName() << "\n");
 
-    Time("New DT",
+    TotalElapsed += Time("New DT",
          [&] {
            NewDomTree NDT(&F.getEntryBlock());
            TouchNOP(&NDT);
+           NDT.verifyAll();
          },
-         current, NumFun);
+         ++current, NumFun);
   }
 
-  outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n Old DT: Total time\t"
+  outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n New DT: Total time\t"
          << TotalElapsed.count() << " ms\n\n";
 }
 
@@ -130,7 +131,7 @@ int main(int argc, char **argv) {
 
   if (NewDT) RunNew(*M);
 
-  if (Verify) errs() << "Verify not implemented";
+  if (Verify) errs() << "Verify not implemented\n";
 
   return 0;
 }
