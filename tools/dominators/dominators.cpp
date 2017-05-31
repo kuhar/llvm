@@ -10,6 +10,7 @@
 #include "llvm/IR/DomSupport.h"
 
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -17,6 +18,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/SourceMgr.h"
 
 #include <fstream>
 #include <sstream>
@@ -46,6 +48,10 @@ static bool isGraphFile(StringRef Filename) {
 
 static bool isIRFile(StringRef Filename) {
   return Filename.endswith(".ll");
+}
+
+static bool isBitcodeFile(StringRef Filename) {
+  return Filename.endswith(".bc");
 }
 
 static void updateGraph(InputGraph& IG, bool UpdateIR) {
@@ -103,7 +109,37 @@ static std::error_code outputIR(InputGraph &IG) {
 }
 
 static Optional<InputGraph> readGraph() {
-  return InputGraph::readFromFile(InputFile);
+  if (isIRFile(InputFile)) {
+    errs() << "The tool cannot read textual IR files\n";
+    return None;
+  }
+
+  if (isGraphFile(InputFile))
+    return InputGraph::readFromFile(InputFile);
+
+  if (isBitcodeFile(InputFile)) {
+    auto *Context = new LLVMContext();
+    SMDiagnostic Diags;
+    auto M = parseIRFile(InputFile, Diags, *Context);
+    if (!M) {
+      Diags.print(InputFile.c_str(), errs());
+      return  None;
+    }
+
+    if (M->getFunctionList().size() != 1) {
+      errs() << "Input modules must have exactly one function, not "
+             << M->getFunctionList().size() << "\n";
+      return None;
+    }
+
+    if (ViewCFG)
+      M->getFunctionList().front().viewCFG();
+    
+    return InputGraph::fromModule(*M);
+  }
+
+  errs() << "Unknown file format for " << InputFile << "\n";
+  return None;
 }
 
 static bool validateConsoleFlags() {
@@ -163,6 +199,8 @@ int main(int argc, char **argv) {
   }
 
   auto *RootBB = Graph->toCFG();
+  if (ViewCFG)
+    RootBB->getParent()->viewCFG();
 
   if (ToIR) {
     auto EC = outputIR(*Graph);
@@ -180,10 +218,6 @@ int main(int argc, char **argv) {
     errs() << "NewDomTree verification failed.\n";
 
   DT.dump();
-  if (ViewCFG) {
-    DT.addDebugInfoToIR();
-    DT.viewCFG();
-  }
 
   Optional<InputGraph::CFGUpdate> Update;
   while ((Update = Graph->applyUpdate())) {
