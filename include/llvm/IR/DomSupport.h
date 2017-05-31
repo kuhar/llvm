@@ -60,7 +60,7 @@ struct InputGraph {
 
   void dump(raw_ostream &OS = dbgs()) const;
   void printCurrent(raw_ostream &Out) const;
-  // Returns entry/root;
+  // Returns entry
   BasicBlock *toCFG();
 
   using CFGArc = std::pair<BasicBlock *, BasicBlock *>;
