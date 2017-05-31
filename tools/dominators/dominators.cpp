@@ -46,15 +46,13 @@ static bool isGraphFile(StringRef Filename) {
   return Filename.endswith(".txt");
 }
 
-static bool isIRFile(StringRef Filename) {
-  return Filename.endswith(".ll");
-}
+static bool isIRFile(StringRef Filename) { return Filename.endswith(".ll"); }
 
 static bool isBitcodeFile(StringRef Filename) {
   return Filename.endswith(".bc");
 }
 
-static void updateGraph(InputGraph& IG, bool UpdateIR) {
+static void updateGraph(InputGraph &IG, bool UpdateIR) {
   unsigned UpdatesRequested = 0;
   if (ApplyAll)
     UpdatesRequested = static_cast<unsigned>(-1);
@@ -82,8 +80,7 @@ static std::error_code outputGraph(InputGraph &IG) {
 
   std::error_code EC;
   raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
-  if (EC)
-    return EC;
+  if (EC) return EC;
 
   IG.printCurrent(Out);
   return {};
@@ -96,8 +93,7 @@ static std::error_code outputIR(InputGraph &IG) {
   }
   std::error_code EC;
   raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
-  if (EC)
-    return EC;
+  if (EC) return EC;
 
   if (isIRFile(OutputFile)) {
     IG.cfg->module.print(Out, nullptr);
@@ -114,8 +110,7 @@ static Optional<InputGraph> readGraph() {
     return None;
   }
 
-  if (isGraphFile(InputFile))
-    return InputGraph::readFromFile(InputFile);
+  if (isGraphFile(InputFile)) return InputGraph::readFromFile(InputFile);
 
   if (isBitcodeFile(InputFile)) {
     auto *Context = new LLVMContext();
@@ -123,7 +118,7 @@ static Optional<InputGraph> readGraph() {
     auto M = parseIRFile(InputFile, Diags, *Context);
     if (!M) {
       Diags.print(InputFile.c_str(), errs());
-      return  None;
+      return None;
     }
 
     if (M->getFunctionList().size() != 1) {
@@ -132,8 +127,7 @@ static Optional<InputGraph> readGraph() {
       return None;
     }
 
-    if (ViewCFG)
-      M->getFunctionList().front().viewCFG();
+    if (ViewCFG) M->getFunctionList().front().viewCFG();
 
     return InputGraph::fromModule(*M);
   }
@@ -153,12 +147,12 @@ static bool validateConsoleFlags() {
     return false;
   }
 
-  const InputKind Kind = isGraphFile(InputFile) ? InputKind::Graph
-                                                : InputKind::IR;
+  const InputKind Kind =
+      isGraphFile(InputFile) ? InputKind::Graph : InputKind::IR;
 
   if (ToGraph && Kind == InputKind::Graph && !ApplyUpdates && !ApplyAll) {
-    errs() << "Input and output kinds are the same (graph), but there are " <<
-           "no updates to apply\n";
+    errs() << "Input and output kinds are the same (graph), but there are "
+           << "no updates to apply\n";
     return false;
   }
 
@@ -175,15 +169,13 @@ int main(int argc, char **argv) {
   PrettyStackTraceProgram X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "dominators");
 
-  if (!validateConsoleFlags())
-    return 1;
+  if (!validateConsoleFlags()) return 1;
 
   auto Graph = readGraph();
   if (!Graph) {
     errs() << "Invalid input graph\n";
     return 1;
   }
-
 
   DEBUG(dbgs() << "\n\n~~~~~~~~ Input Graph ~~~~~~~~~~~~~~~\n\n");
   DEBUG(Graph->dump());
@@ -200,8 +192,7 @@ int main(int argc, char **argv) {
   }
 
   auto *RootBB = Graph->toCFG();
-  if (ViewCFG)
-    RootBB->getParent()->viewCFG();
+  if (ViewCFG) RootBB->getParent()->viewCFG();
 
   if (ToIR) {
     auto EC = outputIR(*Graph);
@@ -215,8 +206,7 @@ int main(int argc, char **argv) {
 
   NewDomTree DT(RootBB);
 
-  if (!DT.verifyAll())
-    errs() << "NewDomTree verification failed.\n";
+  if (!DT.verifyAll()) errs() << "NewDomTree verification failed.\n";
 
   DT.dump();
 

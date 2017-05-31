@@ -15,6 +15,8 @@
 #ifndef LLVM_IR_NEW_DOMINATORS_H
 #define LLVM_IR_NEW_DOMINATORS_H
 
+#include <queue>
+#include <utility>
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/GraphTraits.h"
@@ -22,10 +24,8 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Pass.h"
-#include <queue>
-#include <utility>
+#include "llvm/Support/Debug.h"
 
 namespace llvm {
 
@@ -40,15 +40,14 @@ using Index = unsigned;
 struct NodeByName {
   bool operator()(const Node first, const Node second) const {
     const auto Cmp = first->getName().compare_numeric(second->getName());
-    if (Cmp == 0)
-      return less{}(first, second);
+    if (Cmp == 0) return less{}(first, second);
 
     return Cmp < 0;
   }
 };
 
 class NewDomTree {
-public:
+ public:
   NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
 
   bool contains(Node N) const;
@@ -73,7 +72,7 @@ public:
   void viewCFG() const { root->getParent()->viewCFG(); }
   void dumpLegacyDomTree() const;
 
-private:
+ private:
   Node root;
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> rdoms;
@@ -112,7 +111,7 @@ private:
     };
 
     std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
-        DecreasingLevel>
+                        DecreasingLevel>
         bucket;
     DenseSet<Node> affected;
     DenseSet<Node> visited;
@@ -155,8 +154,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
   while (!WorkList.empty()) {
     BasicBlock *BB = WorkList.back();
     WorkList.pop_back();
-    if (Visited.count(BB) != 0)
-      continue;
+    if (Visited.count(BB) != 0) continue;
 
     Res.nodeToNum[BB] = Res.nextDFSNum;
     Res.numToNode[Res.nextDFSNum] = BB;
@@ -174,6 +172,6 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
   return Res;
 }
 
-} // end namespace llvm
+}  // end namespace llvm
 
-#endif // LLVM_IR_NEW_DOMINATORS_H
+#endif  // LLVM_IR_NEW_DOMINATORS_H

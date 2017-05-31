@@ -34,7 +34,6 @@ void llvm::connect(BasicBlock *From, BasicBlock *To) {
     return;
   }
 
-
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
   const auto Last = SI->getNumCases();
 
@@ -44,8 +43,8 @@ void llvm::connect(BasicBlock *From, BasicBlock *To) {
 
 void llvm::disconnect(BasicBlock *From, BasicBlock *To) {
   DEBUG(dbgs() << "Deleting BB arc " << From->getName() << " -> "
-         << To->getName() << "\n";
-  dbgs().flush());
+               << To->getName() << "\n";
+        dbgs().flush());
   SwitchInst *SI = cast<SwitchInst>(From->getTerminator());
 
   if (SI->getNumCases() == 0) {
@@ -106,8 +105,7 @@ BasicBlock *InputGraph::toCFG() {
 }
 
 bool InputGraph::connect(const Arc &A) {
-  if (std::find(arcs.begin(), arcs.end(), A) != arcs.end())
-    return false;
+  if (std::find(arcs.begin(), arcs.end(), A) != arcs.end()) return false;
 
   arcs.push_back(A);
   return true;
@@ -115,8 +113,7 @@ bool InputGraph::connect(const Arc &A) {
 
 bool InputGraph::disconnect(const Arc &A) {
   auto it = std::find(arcs.begin(), arcs.end(), A);
-  if (it == arcs.end())
-    return false;
+  if (it == arcs.end()) return false;
 
   std::swap(*it, arcs.back());
   arcs.pop_back();
@@ -124,9 +121,8 @@ bool InputGraph::disconnect(const Arc &A) {
 }
 
 Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
-                                                                 /* = true */) {
-  if (updateIdx == updates.size())
-    return None;
+                                                        /* = true */) {
+  if (updateIdx == updates.size()) return None;
 
   auto Next = updates[updateIdx++];
   bool Updated = false;
@@ -135,10 +131,9 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
   else if (disconnect(Next.arc))
     Updated = true;
 
-  if (!Updated)
-    return None;
+  if (!Updated) return None;
 
-  if (!UpdateIR) // FIXME: Remove API hack when not updating IR...
+  if (!UpdateIR)  // FIXME: Remove API hack when not updating IR...
     return CFGUpdate{Next.action, {nullptr, nullptr}};
 
   auto A = cfg->getArc(Next.arc);
@@ -150,7 +145,7 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
   return CFGUpdate{Next.action, A};
 }
 
-Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
+Optional<InputGraph> InputGraph::readFromFile(const std::string &filename) {
   DEBUG(dbgs() << "Reading input graph: " << filename << "\n");
   std::ifstream IFS(filename);
 
@@ -179,24 +174,21 @@ Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
       } break;
       case 'a': {
         unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
+        if (!(ISS >> x >> y)) llvm_unreachable("Parse error");
         Graph.arcs.push_back({x, y});
       } break;
       case 'e':
         break;
       case 'i': {
         unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
+        if (!(ISS >> x >> y)) llvm_unreachable("Parse error");
         assert(x <= Graph.nodesNum);
         assert(y <= Graph.nodesNum);
         Graph.updates.push_back({InputGraph::Op::Insert, {x, y}});
       } break;
       case 'd': {
         unsigned x, y;
-        if (!(ISS >> x >> y))
-          llvm_unreachable("Parse error");
+        if (!(ISS >> x >> y)) llvm_unreachable("Parse error");
         assert(x <= Graph.nodesNum);
         assert(y <= Graph.nodesNum);
         Graph.updates.push_back({InputGraph::Op::Delete, {x, y}});
@@ -210,8 +202,7 @@ Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
 InputGraph InputGraph::fromFunction(Function *F) {
   DenseMap<BasicBlock *, Index> BBToNum;
   Index nextNum = 0;
-  for (auto &BB : *F)
-    BBToNum[&BB] = nextNum++;
+  for (auto &BB : *F) BBToNum[&BB] = nextNum++;
 
   InputGraph IG;
   IG.nodesNum = nextNum;
@@ -233,16 +224,14 @@ InputGraph InputGraph::fromModule(Module &M) {
 void InputGraph::printCurrent(raw_ostream &Out) const {
   Out << nodesNum << ' ' << arcs.size() << ' ' << entry << ' ' << 1 << '\n';
 
-  for (const auto &A : arcs)
-    Out << "a " << A.first << " " << A.second << '\n';
+  for (const auto &A : arcs) Out << "a " << A.first << " " << A.second << '\n';
 
   Out << "e\n";
 }
 
 void InputGraph::dump(raw_ostream &OS) const {
   OS << "Nodes:\t" << nodesNum << ", entry:\t" << entry << "\nArcs:\n";
-  for (const auto &A : arcs)
-    OS << A.first << "\t->\t" << A.second << "\n";
+  for (const auto &A : arcs) OS << A.first << "\t->\t" << A.second << "\n";
 
   OS << "Updates:\n";
   for (const auto &U : updates)
