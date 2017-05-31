@@ -61,6 +61,8 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   for (Index i = LastNum; i > 0; --i) {
     auto CurrentNode = DFS.numToNode[i];
     for (auto PredNode : predecessors(CurrentNode)) {
+      if (PredNode == CurrentNode) continue;
+
       // Incoming arc from an unreachable node.
       if (DFS.nodeToNum.count(PredNode) == 0) continue;
 
