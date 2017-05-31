@@ -238,3 +238,5 @@ void InputGraph::dump(raw_ostream &OS) const {
     OS << ((U.action == Op::Insert) ? "Ins " : "Del ") << U.arc.first
        << "\t->\t" << U.arc.second << "\n";
 }
+
+void TouchNOP(void*) {}

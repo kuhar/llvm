@@ -7,6 +7,6 @@ set(LLVM_LINK_COMPONENTS
   Support
   )
 
-add_llvm_tool(dominators
-  dominators.cpp
+add_llvm_tool(dt-benchmark
+    dt-benchmark.cpp
   )
