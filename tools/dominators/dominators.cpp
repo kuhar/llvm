@@ -134,7 +134,7 @@ static Optional<InputGraph> readGraph() {
 
     if (ViewCFG)
       M->getFunctionList().front().viewCFG();
-    
+
     return InputGraph::fromModule(*M);
   }
 
@@ -184,6 +184,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+
   DEBUG(dbgs() << "\n\n~~~~~~~~ Input Graph ~~~~~~~~~~~~~~~\n\n");
   DEBUG(Graph->dump());
 
@@ -226,7 +227,7 @@ int main(int argc, char **argv) {
     else
       DT.deleteArc(Update->arc.first, Update->arc.second);
 
-    DT.dump();
+    DEBUG(DT.dump());
   }
 
   if (ViewCFG) {
