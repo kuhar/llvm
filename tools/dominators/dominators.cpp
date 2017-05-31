@@ -21,6 +21,8 @@
 #include <fstream>
 #include <sstream>
 
+#define DEBUG_TYPE "dominators"
+
 using namespace llvm;
 
 static cl::opt<std::string> InputFile(cl::Positional, cl::desc("<input file>"),
@@ -86,7 +88,6 @@ static std::error_code outputIR(InputGraph &IG) {
     IG.cfg->module.print(outs(), nullptr);
     return {};
   }
-
   std::error_code EC;
   raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
   if (EC)
@@ -98,7 +99,6 @@ static std::error_code outputIR(InputGraph &IG) {
   }
 
   WriteBitcodeToFile(&IG.cfg->module, Out);
-  IG.cfg->module.dump();
   return {};
 }
 
@@ -148,8 +148,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  dbgs() << "\n\n~~~~~~~~ Input Graph ~~~~~~~~~~~~~~~\n\n";
-  Graph->dump();
+  DEBUG(dbgs() << "\n\n~~~~~~~~ Input Graph ~~~~~~~~~~~~~~~\n\n");
+  DEBUG(Graph->dump());
 
   if (ToGraph) {
     updateGraph(*Graph, false);
@@ -173,8 +173,6 @@ int main(int argc, char **argv) {
 
     return 0;
   }
-
-  dbgs() << "\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n";
 
   NewDomTree DT(RootBB);
 
