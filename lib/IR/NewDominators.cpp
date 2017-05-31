@@ -142,7 +142,7 @@ void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
 
   auto DFSRes = runDFS(root, LevelDescender);
   preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
-  DFSRes.dumpDFSNumbering();
+  DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, Root, MinLevel);
 }
@@ -165,7 +165,7 @@ void NewDomTree::computeUnreachableDominators(
 
   auto DFSRes = runDFS(Root, UnreachableDescender);
   preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
-  DFSRes.dumpDFSNumbering();
+  DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, Root, /* MinLevel = */ 0, Incoming);
 }
@@ -405,7 +405,7 @@ void NewDomTree::deleteReachable(Node From, Node To) {
       return;
   }
 
-  dbgs() << "Subtree needs to be rebuilt\n";
+  DEBUG(dbgs() << "Subtree needs to be rebuilt\n");
   const Node IDomTo = getIDom(To);
   const Node PrevIDomSubTree = getIDom(IDomTo);
   const Index Level = getLevel(IDomTo);
@@ -413,18 +413,19 @@ void NewDomTree::deleteReachable(Node From, Node To) {
     return getLevel(To) > Level;
   };
 
-  dbgs() << "Top of subtree: " << IDomTo->getName() << " [" << Level << "]\n";
+  DEBUG(dbgs() << "Top of subtree: " << IDomTo->getName() << " [" << Level
+               << "]\n");
 
   auto DFSRes = runDFS(IDomTo, DescendBelow);
-  DFSRes.dumpDFSNumbering();
+  DEBUG(DFSRes.dumpDFSNumbering());
   preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
 
-  dbgs() << "Running SNCA\n";
+  DEBUG(dbgs() << "Running SNCA\n");
   semiNCA(DFSRes, IDomTo, Level, PrevIDomSubTree);
 }
 
 void NewDomTree::deleteUnreachable(Node To) {
-  dbgs() << "Deleting unreachable " << To->getName() << "\n";
+  DEBUG(dbgs() << "Deleting unreachable " << To->getName() << "\n");
 
   SmallVector<Node, 8> affectedQueue;
   SmallDenseSet<Node, 8> affected;
@@ -441,7 +442,7 @@ void NewDomTree::deleteUnreachable(Node To) {
   };
 
   auto DFSRes = runDFS(To, DescendCollect);
-  DFSRes.dumpDFSNumbering();
+  DEBUG(DFSRes.dumpDFSNumbering());
   Node MinNode = To;
 
   for (const Node N : affectedQueue) {
@@ -461,16 +462,17 @@ void NewDomTree::deleteUnreachable(Node To) {
   if (MinNode == To)
     return;
 
-  dbgs() << "DeleteUnreachable: running SNCA(MinNode = "
-         << MinNode->getName() << ")\n";
+  DEBUG(dbgs() << "DeleteUnreachable: running SNCA(MinNode = "
+               << MinNode->getName() << ")\n");
   const Index MinLevel = getLevel(MinNode);
   const Node PrevIDomMin = getIDom(MinNode);
   DFSRes = runDFS(MinNode, [MinLevel, this] (Node, Node To) {
     return contains(To) && getLevel(To) > MinLevel;
   });
-  DFSRes.dumpDFSNumbering();
+  DEBUG(DFSRes.dumpDFSNumbering());
 
-  dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName() << "\n";
+  DEBUG(dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName()
+               << "\n");
   semiNCA(DFSRes, MinNode, MinLevel, PrevIDomMin);
 }
 
@@ -541,8 +543,8 @@ bool NewDomTree::verifyWithOldDT() const {
 
     auto Node = NodeToIDom.first;
     auto IDom = NodeToIDom.second;
-    errs() << "Veryfing arc:\t" << Node->getName() << " -> "
-           << IDom->getName() << "\n";
+    DEBUG(dbgs() << "Veryfing arc:\t" << Node->getName() << " -> "
+                 << IDom->getName() << "\n");
     auto DTN = DT.getNode(Node);
     auto *CorrectIDom = DTN->getIDom()->getBlock();
     if (CorrectIDom != IDom) {
@@ -571,8 +573,8 @@ bool NewDomTree::verifyNCA() const {
       auto NCA = findNCA(&BB, Succ);
       if (NCA != Succ && NCA != getIDom(Succ)) {
         Correct = false;
-        dbgs() << "Error:\tNCA(" << BB.getName() << ", " << Succ->getName()
-               << ") = " << NCA->getName();
+        DEBUG(dbgs() << "Error:\tNCA(" << BB.getName() << ", "
+                     << Succ->getName() << ") = " << NCA->getName());
       }
     }
   }
@@ -592,8 +594,8 @@ bool NewDomTree::verifyLevels() const {
     const Index IDomL = getLevel(IDom);
     if (BBL != (IDomL + 1)) {
       Correct = false;
-      dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", "
-             << "Level(" << IDom << ") = " << IDomL << "\n";
+      DEBUG(dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", "
+                   << "Level(" << IDom << ") = " << IDomL << "\n");
     }
   }
 
@@ -613,10 +615,10 @@ void NewDomTree::print(raw_ostream &OS) const {
     ToPrint.insert(NodeToIDom.first);
   }
 
-  dbgs() << "\nNew Dominator Tree:\n";
+  OS << "\nNew Dominator Tree:\n";
   while (!ToPrint.empty())
     printImpl(OS, *ToPrint.begin(), Children, ToPrint);
-  dbgs() << "\n";
+  OS << "\n";
 }
 
 void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,

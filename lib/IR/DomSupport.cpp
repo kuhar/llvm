@@ -153,7 +153,12 @@ Optional<InputGraph::CFGUpdate> InputGraph::applyUpdate(bool UpdateIR
 Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
   DEBUG(dbgs() << "Reading input graph: " << filename << "\n");
   std::ifstream IFS(filename);
-  dbgs() << IFS.good() << "\n";
+
+  if (!IFS.good()) {
+    errs() << "Could not read graph input file\n";
+    return None;
+  }
+
   InputGraph Graph;
 
   for (std::string Line; std::getline(IFS, Line) && !Line.empty();) {
