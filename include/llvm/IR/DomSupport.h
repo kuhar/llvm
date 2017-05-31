@@ -57,6 +57,8 @@ struct InputGraph {
   std::unique_ptr<GraphCFG> cfg;
 
   static Optional<InputGraph> readFromFile(const std::string& filename);
+  static InputGraph fromFunction(Function *F);
+  static InputGraph fromModule(Module &M);
 
   void dump(raw_ostream &OS = dbgs()) const;
   void printCurrent(raw_ostream &Out) const;

@@ -202,6 +202,29 @@ Optional<InputGraph> InputGraph::readFromFile(const std::string& filename) {
   return std::move(Graph);
 }
 
+InputGraph InputGraph::fromFunction(Function *F) {
+  DenseMap<BasicBlock *, Index> BBToNum;
+  Index nextNum = 0;
+  for (auto &BB : *F)
+    BBToNum[&BB] = nextNum++;
+
+  InputGraph IG;
+  IG.nodesNum = nextNum;
+  IG.arcs.reserve(nextNum);
+  IG.entry = BBToNum[&F->getEntryBlock()];
+
+  for (auto &BB : *F)
+    for (auto *Succ : successors(&BB))
+      IG.arcs.push_back({BBToNum[&BB], BBToNum[Succ]});
+
+  return IG;
+}
+
+InputGraph InputGraph::fromModule(Module &M) {
+  assert(M.getFunctionList().size() == 1);
+  return fromFunction(&M.getFunctionList().front());
+}
+
 void InputGraph::printCurrent(raw_ostream &Out) const {
   Out << nodesNum << ' ' << arcs.size() << ' ' << entry << ' ' << 1 << '\n';
 
