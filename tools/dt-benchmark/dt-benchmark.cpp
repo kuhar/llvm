@@ -73,6 +73,9 @@ static void RunOld(Module &M) {
   std::chrono::milliseconds TotalElapsed{0};
   for (auto &F : M.getFunctionList()) {
     if (Progress) ++current;
+    if (F.getBasicBlockList().empty())
+      continue;
+
     DEBUG(dbgs() << F.getName() << "\n");
 
     TotalElapsed += Time("Old DT",
@@ -93,6 +96,9 @@ static void RunNew(Module &M) {
   std::chrono::milliseconds TotalElapsed{0};
   for (auto &F : M.getFunctionList()) {
     if (Progress) ++current;
+    if (F.getBasicBlockList().empty())
+      continue;
+
     DEBUG(dbgs() << F.getName() << "\n");
 
     Time("New DT",
