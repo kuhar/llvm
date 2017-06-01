@@ -89,7 +89,7 @@ static void RunOld(Module &M) {
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n Old DT: Total time\t"
-         << TotalElapsed.count() << " ms\n\n";
+         << TotalElapsed.count() << " us\n\n";
 }
 
 static void RunNew(Module &M) {
@@ -112,7 +112,7 @@ static void RunNew(Module &M) {
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n New DT: Total time\t"
-         << TotalElapsed.count() << " ms\n\n";
+         << TotalElapsed.count() << " us\n\n";
 }
 
 int main(int argc, char **argv) {
