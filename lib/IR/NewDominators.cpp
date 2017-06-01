@@ -206,6 +206,9 @@ Node NewDomTree::findNCA(Node First, Node Second) const {
 }
 
 bool NewDomTree::dominates(Node Src, Node Dst) const {
+  if (getIDom(Dst) == Src)
+    return true;
+
   if (!isInOutValid) recomputeInOutNums();
 
   const auto SrcInOutIt = inOutNums.find(Src);
