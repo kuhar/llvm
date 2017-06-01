@@ -34,7 +34,8 @@ static cl::opt<std::string> InputFile(cl::Positional, cl::desc("<input file>"),
 
 static cl::opt<bool> OldDT("old", cl::desc("Test old DT"));
 static cl::opt<bool> NewDT("new", cl::desc("Test new DT"));
-static cl::opt<bool> Verify("verify", cl::desc("Verify correctness"));
+static cl::opt<bool> Verify("verify", cl::desc("Verify correctness"),
+                            cl::init(false));
 static cl::opt<bool> Progress("progress", cl::desc("Show progress"));
 
 extern bool llvm::VerifyDomInfo;
@@ -105,7 +106,7 @@ static void RunNew(Module &M) {
          [&] {
            NewDomTree NDT(&F.getEntryBlock());
            TouchNOP(&NDT);
-           NDT.verifyAll();
+           if (VerifyDomInfo) NDT.verifyAll();
          },
          ++current, NumFun);
   }
@@ -125,7 +126,9 @@ int main(int argc, char **argv) {
   outs() << "Bitcode read; module has " << M->getFunctionList().size()
          << " functions\n\n";
 
-  if (Verify) VerifyDomInfo = true;
+  VerifyDomInfo = Verify.getValue();
+  if (VerifyDomInfo)
+    outs() << "== Verification on ===\n";
 
   if (OldDT) RunOld(*M);
 

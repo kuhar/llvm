@@ -91,6 +91,7 @@ class NewDomTree {
     DenseMap<Node, Index> nodeToNum;
     DenseMap<Index, Node> numToNode;
     DenseMap<Node, Node> parent;
+    DenseMap<Node, SmallVector<Node, 4>> predecessors;
 
     void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
   };
@@ -160,13 +161,15 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
     Res.numToNode[Res.nextDFSNum] = BB;
     ++Res.nextDFSNum;
     Visited.insert(BB);
-
-    for (auto *Succ : reverse(successors(BB)))
+    for (auto *Succ : reverse(successors(BB))) {
+      if (Succ != BB)
+        Res.predecessors[Succ].push_back(BB);
       if (Visited.count(Succ) == 0)
         if (Condition(BB, Succ)) {
           WorkList.push_back(Succ);
           Res.parent[Succ] = BB;
         }
+    }
   }
 
   return Res;
