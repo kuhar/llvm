@@ -60,7 +60,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
     auto CurrentNode = DFS.numToNode[i];
-    for (auto PredNode : predecessors(CurrentNode)) {
+    for (auto PredNode : DFS.predecessors[CurrentNode]) {
       if (PredNode == CurrentNode) continue;
 
       // Incoming arc from an unreachable node.
