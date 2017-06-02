@@ -20,6 +20,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/NewDominators.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
@@ -209,6 +210,9 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   auto *Preheader = L->getLoopPreheader();
   assert(Preheader && "Preheader should exist!");
 
+  NewDomTree NDT(DT.getRootNode()->getBlock());
+  NDT.verifyAll(true);
+
   // Now that we know the removal is safe, remove the loop by changing the
   // branch from the preheader to go to the single exit block.
   //
@@ -252,6 +256,10 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
       P->removeIncomingValue(ExitingBlocks[i]);
     ++BI;
   }
+
+  NDT.deleteArc(Preheader, L->getHeader());
+  NDT.insertArc(Preheader, ExitBlock);
+  NDT.verifyAll(true);
 
   // Update the dominator tree and remove the instructions and blocks that will
   // be deleted from the reference counting scheme.

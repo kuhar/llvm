@@ -60,7 +60,7 @@ class NewDomTree {
   void insertArc(Node From, Node To);
   void deleteArc(Node From, Node To);
 
-  bool verifyAll() const;
+  bool verifyAll(bool VerifyWithOldDT = false) const;
   bool verifyWithOldDT() const;
   bool verifyNCA() const;
   bool verifyLevels() const;

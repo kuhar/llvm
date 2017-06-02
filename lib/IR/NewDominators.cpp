@@ -36,6 +36,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
                          const Node AttachTo /* = nullptr */) {
   assert(DFS.nodeToNum.count(Root) != 0);
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
+
   DenseMap<Node, Node> Label;
   DenseMap<Node, Node> SDoms;
   const Index LastNum = DFS.nextDFSNum - 1;
@@ -286,6 +287,7 @@ void NewDomTree::insertReachable(Node From, Node To) {
   updateInsertion(NCA, II);
 
   DEBUG(dbgs() << "Clearing stuff\n");
+  DEBUG(dump());
 }
 
 void NewDomTree::visitInsertion(Node N, Index RootLevel, Node NCA,
@@ -442,6 +444,9 @@ void NewDomTree::deleteUnreachable(Node To) {
 
   for (Index i = 0; i < DFSRes.nextDFSNum; ++i) {
     const Node N = DFSRes.numToNode[i];
+    DEBUG(dbgs() << "Erasing node info "  << N->getName()
+                 << " (level " << levels[N] << ", idom "
+                 << idoms[N]->getName() << ")\n");
     idoms.erase(N);
     rdoms.erase(N);
     levels.erase(N);
@@ -494,14 +499,8 @@ void NewDomTree::recomputeInOutNums() const {
   isInOutValid = true;
 }
 
-bool NewDomTree::verifyAll() const {
+bool NewDomTree::verifyAll(bool VerifyWithOldDT /* = false */) const {
   bool IsCorrect = true;
-
-  if (!verifyWithOldDT()) {
-    IsCorrect = false;
-    errs() << "\nIncorrect domtree!\n";
-    dumpLegacyDomTree();
-  }
 
   if (!verifyNCA()) {
     IsCorrect = false;
@@ -511,6 +510,12 @@ bool NewDomTree::verifyAll() const {
   if (!verifyLevels()) {
     IsCorrect = false;
     errs() << "\nIncorrect levels!\n";
+  }
+
+  if (VerifyWithOldDT && !verifyWithOldDT()) {
+    IsCorrect = false;
+    errs() << "\nIncorrect domtree!\n";
+    dumpLegacyDomTree();
   }
 
   return IsCorrect;
@@ -528,14 +533,13 @@ bool NewDomTree::verifyWithOldDT() const {
 
     auto Node = NodeToIDom.first;
     auto IDom = NodeToIDom.second;
-    DEBUG(dbgs() << "Veryfing arc:\t" << Node->getName() << " -> "
-                 << IDom->getName() << "\n");
     auto DTN = DT.getNode(Node);
     auto *CorrectIDom = DTN->getIDom()->getBlock();
     if (CorrectIDom != IDom) {
       errs() << "!! NewDT:\t" << Node->getName() << " -> " << IDom->getName()
              << "\n   OldDT:\t" << Node->getName() << " -> "
              << CorrectIDom->getName() << "\n";
+
       Correct = false;
     }
   }
@@ -551,6 +555,7 @@ bool NewDomTree::verifyNCA() const {
 
     // For every arc U -> V in the graph, NCA(U, V) = idoms[V] or V.
     for (auto *Succ : successors(&BB)) {
+      if (!contains(Succ)) continue;
       // dbgs() << "Checking NCA(" << BB.getName() << ", " << Succ->getName() <<
       //          ")\n";
 
@@ -598,7 +603,7 @@ void NewDomTree::print(raw_ostream &OS) const {
   }
 
   OS << "\nNew Dominator Tree:\n";
-  while (!ToPrint.empty()) printImpl(OS, *ToPrint.begin(), Children, ToPrint);
+  while (!ToPrint.empty()) printImpl(OS, root, Children, ToPrint);
   OS << "\n";
 }
 
@@ -608,7 +613,7 @@ void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
   ToPrint.erase(N);
   const auto LevelIt = levels.find(N);
   assert(LevelIt != levels.end());
-  const auto Level = LevelIt->second;
+const auto Level = LevelIt->second;
   for (Index i = 0; i <= Level; ++i) OS << "  ";
 
   const auto InOutNumIt = inOutNums.find(N);
@@ -636,7 +641,7 @@ void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
   std::vector<KeyValue> Sorted(nodeToNum.begin(), nodeToNum.end());
 
   sort(Sorted.begin(), Sorted.end(), [](KeyValue first, KeyValue second) {
-    return first.first->getName().compare(second.first->getName()) < 0;
+    return first.second < second.second;
   });
 
   for (const auto &NodeToNum : Sorted)
