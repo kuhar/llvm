@@ -64,6 +64,8 @@ class NewDomTree {
   bool verifyWithOldDT() const;
   bool verifyNCA() const;
   bool verifyLevels() const;
+  bool verifyParentProperty() const;
+  bool verifySiblingProperty() const;
 
   void print(raw_ostream &OS) const;
   void dump() const { print(dbgs()); }

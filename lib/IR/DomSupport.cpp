@@ -210,7 +210,7 @@ InputGraph InputGraph::fromFunction(Function *F) {
   IG.entry = BBToNum[&F->getEntryBlock()];
 
   for (auto &BB : *F)
-    for (auto *Succ : successors(&BB))
+  for (auto *Succ : successors(&BB))
       IG.arcs.push_back({BBToNum[&BB], BBToNum[Succ]});
 
   return IG;
