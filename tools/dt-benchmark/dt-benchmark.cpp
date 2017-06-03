@@ -89,7 +89,7 @@ static void RunOld(Module &M) {
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n Old DT: Total time\t"
-         << TotalElapsed.count() << " us\n\n";
+         << TotalElapsed.count() << " us\n";
 }
 
 static void RunNew(Module &M) {
@@ -112,7 +112,7 @@ static void RunNew(Module &M) {
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n New DT: Total time\t"
-         << TotalElapsed.count() << " us\n\n";
+         << TotalElapsed.count() << " us\n";
 }
 
 int main(int argc, char **argv) {
@@ -124,17 +124,15 @@ int main(int argc, char **argv) {
   if (!M) return 1;
 
   outs() << "Bitcode read; module has " << M->getFunctionList().size()
-         << " functions\n\n";
+         << " functions\n";
 
   VerifyDomInfo = Verify.getValue();
   if (VerifyDomInfo)
-    outs() << "== Verification on ===\n";
+    outs() << "=== Verification on ===\n";
 
   if (OldDT) RunOld(*M);
 
   if (NewDT) RunNew(*M);
-
-  if (Verify) errs() << "Verify not implemented\n";
 
   return 0;
 }

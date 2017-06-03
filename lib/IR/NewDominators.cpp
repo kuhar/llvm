@@ -32,6 +32,9 @@ static cl::opt<bool, true> VerifyNewDomInfoX(
     "verify-new-dom-info", cl::location(VerifyNewDomInfo),
     cl::desc("Verify new dominator info (time consuming)"));
 
+static cl::opt<bool> VerifySiblingProperty("verify-sibling-property",
+                                           cl::init(false));
+
 void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
                          const Node AttachTo /* = nullptr */) {
   assert(DFS.nodeToNum.count(Root) != 0);
@@ -512,6 +515,16 @@ bool NewDomTree::verifyAll(bool VerifyWithOldDT /* = false */) const {
     errs() << "\nIncorrect levels!\n";
   }
 
+  if (!verifyParentProperty()) {
+    IsCorrect = false;
+    errs() << "\nParent property doesn't hold!\n";
+  }
+
+  if (VerifySiblingProperty && !verifySiblingProperty()) {
+    IsCorrect = false;
+    errs() << "\nSibling property doesn't hold!\n";
+  }
+
   if (VerifyWithOldDT && !verifyWithOldDT()) {
     IsCorrect = false;
     errs() << "\nIncorrect domtree!\n";
@@ -584,6 +597,76 @@ bool NewDomTree::verifyLevels() const {
       Correct = false;
       DEBUG(dbgs() << "Error:\tLevel(" << BB.getName() << ") = " << BBL << ", "
                    << "Level(" << IDom << ") = " << IDomL << "\n");
+    }
+  }
+
+  return Correct;
+}
+
+bool NewDomTree::verifyParentProperty() const {
+  bool Correct = true;
+  for (auto NodeToIDom : idoms) {
+    const Node IDom = NodeToIDom.second;
+    const Node Target = NodeToIDom.first;
+
+    if (IDom == root)
+      continue;
+
+    auto SkipIDom = [&] (Node, Node Succ) {
+      if (Succ == IDom)
+        return false;
+
+      if (!contains(Succ)) {
+        errs() << "=================== Incorrect domtree! ===============\n";
+        errs() << "DFS walk over a graph rooted at " << root->getName()
+               << " found node " << Succ->getName()
+               << " not present in the DomTree\n";
+        Correct = false;
+      }
+
+      return true;
+    };
+
+    auto DFSRes = runDFS(root, SkipIDom);
+    if (DFSRes.nodeToNum.count(Target)) {
+      errs() << "=================== Incorrect domtree! ===============\n";
+      errs() << "DFS walk found a path from " << root->getName()
+             << " to " << Target->getName() << " skipping its idom "
+             << IDom->getName() << "\n";
+      DFSRes.dumpDFSNumbering(errs());
+      Correct = false;
+    }
+  }
+
+  return Correct;
+}
+
+bool NewDomTree::verifySiblingProperty() const {
+  bool Correct = true;
+
+  DenseMap<Node, SmallVector<Node, 8>> IDomToChildren;
+  for (auto NodeToIDom : idoms)
+    IDomToChildren[NodeToIDom.second].push_back(NodeToIDom.first);
+
+  for (auto &ITC : IDomToChildren) {
+    const auto& Siblings = ITC.second;
+    for (auto N : Siblings) {
+      for (auto S : Siblings) {
+        if (S == N)
+          continue;
+
+        auto SkipSibling = [&](Node, Node Succ) { return Succ != S; };
+        auto DFSRes = runDFS(root, SkipSibling);
+        if (DFSRes.nodeToNum.count(N) == 0) {
+          errs() << "=================== Incorrect domtree! ===============\n";
+          errs() << "DFS walk didn't find a path from " << root->getName()
+                 << " to " << N->getName() << " skipping its sibling "
+                 << S->getName() << "\n";
+
+          DFSRes.dumpDFSNumbering(errs());
+          Correct = false;
+        }
+      }
     }
   }
 
