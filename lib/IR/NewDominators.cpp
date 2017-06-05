@@ -237,7 +237,7 @@ void NewDomTree::insertArc(Node From, Node To) {
   else  // Both were reachable.
     insertReachable(From, To);
 
-  if (VerifyNewDomInfo && !verifyAll())
+  if (VerifyNewDomInfo && !verify(Verification::Basic))
     DEBUG(dbgs() << "Verification after insertion failed!\n");
 }
 
@@ -373,8 +373,10 @@ void NewDomTree::deleteArc(Node From, Node To) {
   else
     deleteUnreachable(To);
 
-  if (VerifyNewDomInfo && !verifyAll())
+  if (VerifyNewDomInfo && !verify(Verification::Basic)) {
     DEBUG(dbgs() << "Verification after deletion failed!\n");
+    DEBUG(dbgs().flush());
+  }
 }
 
 bool NewDomTree::isReachableFromIDom(Node N) {
@@ -502,35 +504,49 @@ void NewDomTree::recomputeInOutNums() const {
   isInOutValid = true;
 }
 
-bool NewDomTree::verifyAll(bool VerifyWithOldDT /* = false */) const {
+bool NewDomTree::verify(Verification VerificationLevel) const {
+  assert(VerificationLevel != Verification::None);
   bool IsCorrect = true;
 
-  if (!verifyNCA()) {
-    IsCorrect = false;
-    errs() << "\nIncorrect NCA!\n";
+  const auto VL = static_cast<unsigned>(VerificationLevel);
+  if ((VL & unsigned(Verification::Basic)) != 0) {
+    if (!verifyNCA()) {
+      IsCorrect = false;
+      errs() << "\nIncorrect NCA!\n";
+    }
+
+    if (!verifyLevels()) {
+      IsCorrect = false;
+      errs() << "\nIncorrect levels!\n";
+    }
   }
 
-  if (!verifyLevels()) {
-    IsCorrect = false;
-    errs() << "\nIncorrect levels!\n";
+  if ((VL & unsigned(Verification::CFG)) != 0) {
+    if (!verifyReachability()) {
+      IsCorrect = false;
+      errs() << "\nIncorrect reachability!\n";
+    }
+
+    if (!verifyParentProperty()) {
+      IsCorrect = false;
+      errs() << "\nParent property doesn't hold!\n";
+    }
   }
 
-  if (!verifyParentProperty()) {
-    IsCorrect = false;
-    errs() << "\nParent property doesn't hold!\n";
-  }
-
-  if (VerifySiblingProperty && !verifySiblingProperty()) {
+  if ((VL & unsigned(Verification::Sibling)) != 0 && !verifySiblingProperty()) {
     IsCorrect = false;
     errs() << "\nSibling property doesn't hold!\n";
   }
 
-  if (VerifyWithOldDT && !verifyWithOldDT()) {
+  if ((VL & unsigned(Verification::OldDT)) != 0 && !verifyWithOldDT()) {
     IsCorrect = false;
     errs() << "\nIncorrect domtree!\n";
-    dumpLegacyDomTree();
+    DEBUG(dumpLegacyDomTree());
+    DEBUG(dbgs().flush());
   }
 
+  if (!IsCorrect)
+    abort();
   return IsCorrect;
 }
 
@@ -603,6 +619,26 @@ bool NewDomTree::verifyLevels() const {
   return Correct;
 }
 
+bool NewDomTree::verifyReachability() const {
+  bool Correct = true;
+
+  auto DFSRes = runDFS(root, [] (Node, Node) { return true; });
+  for (auto NodeToNum : DFSRes.nodeToNum)
+    if (!contains(NodeToNum.first)) {
+      errs() << "=================== Incorrect domtree! ===============\n";
+      errs() << "DFS walk found a node not present in the DomTree "
+             << NodeToNum.first->getName() << "\n";
+
+      dumpIDoms(errs());
+      Correct = false;
+    }
+
+  if (!Correct)
+    DFSRes.dumpDFSNumbering(errs());
+
+  return Correct;
+}
+
 bool NewDomTree::verifyParentProperty() const {
   bool Correct = true;
   for (auto NodeToIDom : idoms) {
@@ -612,29 +648,20 @@ bool NewDomTree::verifyParentProperty() const {
     if (IDom == root)
       continue;
 
-    auto SkipIDom = [&] (Node, Node Succ) {
-      if (Succ == IDom)
-        return false;
-
-      if (!contains(Succ)) {
-        errs() << "=================== Incorrect domtree! ===============\n";
-        errs() << "DFS walk over a graph rooted at " << root->getName()
-               << " found node " << Succ->getName()
-               << " not present in the DomTree\n";
-        Correct = false;
-      }
-
-      return true;
-    };
-
+    auto SkipIDom = [&] (Node, Node Succ) { return Succ != IDom; };
     auto DFSRes = runDFS(root, SkipIDom);
     if (DFSRes.nodeToNum.count(Target)) {
       errs() << "=================== Incorrect domtree! ===============\n";
       errs() << "DFS walk found a path from " << root->getName()
              << " to " << Target->getName() << " skipping its idom "
              << IDom->getName() << "\n";
+      Target->getParent()->print(errs(), nullptr);
+
+      print(errs());
+
       DFSRes.dumpDFSNumbering(errs());
       Correct = false;
+      abort();
     }
   }
 
@@ -729,6 +756,13 @@ void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
 
   for (const auto &NodeToNum : Sorted)
     OS << NodeToNum.first->getName() << " {" << NodeToNum.second << "}\n";
+}
+
+void NewDomTree::dumpIDoms(raw_ostream &OS) const {
+  OS << "Node -> idom\n";
+  for (auto NodeToIDom : idoms)
+    OS << "\t" << NodeToIDom.first->getName() << " -> "
+       << NodeToIDom.second->getName() << "\n";
 }
 
 void NewDomTree::dumpLevels(raw_ostream &OS) const {

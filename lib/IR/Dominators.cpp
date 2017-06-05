@@ -25,6 +25,7 @@
 #include "llvm/Support/GenericDomTreeConstruction.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <chrono>
 using namespace llvm;
 
 // Always verify dominfo if expensive checking is enabled.
@@ -347,7 +348,16 @@ INITIALIZE_PASS(DominatorTreeWrapperPass, "domtree",
                 "Dominator Tree Construction", true, true)
 
 bool DominatorTreeWrapperPass::runOnFunction(Function &F) {
+  const auto StartTime = std::chrono::steady_clock::now();
   DT.recalculate(F);
+  const auto EndTime = std::chrono::steady_clock::now();
+  static decltype(EndTime - StartTime) TotalElapsed{0};
+  TotalElapsed += EndTime - StartTime;
+  static unsigned n = 0;
+  ++n;
+  outs() << "DT.recalculate " << n << ", "
+         << std::chrono::duration_cast<std::chrono::seconds>(TotalElapsed)
+             .count() << "s\n";
   return false;
 }
 
