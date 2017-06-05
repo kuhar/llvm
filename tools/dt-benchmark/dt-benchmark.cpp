@@ -106,7 +106,7 @@ static void RunNew(Module &M) {
          [&] {
            NewDomTree NDT(&F.getEntryBlock());
            TouchNOP(&NDT);
-           if (VerifyDomInfo) NDT.verifyAll();
+           if (VerifyDomInfo) NDT.verify(NewDomTree::Verification::Normal);
          },
          ++current, NumFun);
   }

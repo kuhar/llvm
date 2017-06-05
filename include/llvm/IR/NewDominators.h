@@ -60,15 +60,28 @@ class NewDomTree {
   void insertArc(Node From, Node To);
   void deleteArc(Node From, Node To);
 
-  bool verifyAll(bool VerifyWithOldDT = false) const;
+  enum Verification : unsigned {
+    None    = 0,
+    Basic   = 1,
+    CFG     = 2,
+    Sibling = 4,
+    OldDT   = 8,
+    Normal  = unsigned(Basic) | unsigned(CFG) | unsigned(OldDT),
+    Full    = unsigned(Basic) | unsigned(CFG) | unsigned(Sibling) |
+              unsigned(OldDT)
+  };
+
+  bool verify(Verification VerificationLevel = Verification::Basic) const;
   bool verifyWithOldDT() const;
   bool verifyNCA() const;
   bool verifyLevels() const;
+  bool verifyReachability() const;
   bool verifyParentProperty() const;
   bool verifySiblingProperty() const;
 
   void print(raw_ostream &OS) const;
   void dump() const { print(dbgs()); }
+  void dumpIDoms(raw_ostream &OS = dbgs()) const;
   void dumpLevels(raw_ostream &OS = dbgs()) const;
   void addDebugInfoToIR();
   void viewCFG() const { root->getParent()->viewCFG(); }

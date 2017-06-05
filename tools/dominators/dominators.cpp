@@ -206,7 +206,8 @@ int main(int argc, char **argv) {
 
   NewDomTree DT(RootBB);
 
-  if (!DT.verifyAll()) errs() << "NewDomTree verification failed.\n";
+  if (!DT.verify(NewDomTree::Verification::Full))
+    errs() << "NewDomTree verification failed.\n";
 
   DT.dump();
 
