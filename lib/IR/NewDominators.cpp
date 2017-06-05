@@ -505,7 +505,8 @@ void NewDomTree::recomputeInOutNums() const {
 }
 
 void NewDomTree::toOldDT(DominatorTree &DT) const {
-  DT.setNewRoot(root);
+  DominatorTree Temp;
+  Temp.setNewRoot(root);
 
   std::vector<std::pair<Index, Node>> LevelsNodes;
   LevelsNodes.reserve(levels.size());
@@ -517,10 +518,13 @@ void NewDomTree::toOldDT(DominatorTree &DT) const {
 
   for (auto LN : LevelsNodes)
     if (LN.second != root)
-      DT.addNewBlock(LN.second, getIDom(LN.second));
+      Temp.addNewBlock(LN.second, getIDom(LN.second));
 
-  DT.updateDFSNumbers();
-  DT.verifyDomTree();
+  Temp.updateDFSNumbers();
+  if (VerifyDomInfo)
+    Temp.verifyDomTree();
+
+  DT = std::move(Temp);
 }
 
 bool NewDomTree::verify(Verification VerificationLevel) const {

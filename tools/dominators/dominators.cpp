@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
 
   DT.dump();
 
-  DominatorTree ODT;
+  DominatorTree ODT(*RootBB->getParent());
   DT.toOldDT(ODT);
   ODT.print(outs());
 

@@ -265,15 +265,15 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   SmallVector<DomTreeNode*, 8> ChildNodes;
   for (Loop::block_iterator LI = L->block_begin(), LE = L->block_end();
        LI != LE; ++LI) {
-    // Move all of the block's children to be children of the Preheader, which
-    // allows us to remove the domtree entry for the block.
-    ChildNodes.insert(ChildNodes.begin(), DT[*LI]->begin(), DT[*LI]->end());
-    for (DomTreeNode *ChildNode : ChildNodes) {
-      DT.changeImmediateDominator(ChildNode, DT[Preheader]);
-    }
-
-    ChildNodes.clear();
-    DT.eraseNode(*LI);
+//    // Move all of the block's children to be children of the Preheader, which
+//    // allows us to remove the domtree entry for the block.
+//    ChildNodes.insert(ChildNodes.begin(), DT[*LI]->begin(), DT[*LI]->end());
+//    for (DomTreeNode *ChildNode : ChildNodes) {
+//      DT.changeImmediateDominator(ChildNode, DT[Preheader]);
+//    }
+//
+//    ChildNodes.clear();
+//    DT.eraseNode(*LI);
 
     // Remove the block from the reference counting scheme, so that we can
     // delete it freely later.
@@ -300,6 +300,9 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   LI.markAsRemoved(L);
 
   NDT.verify(NewDomTree::Verification::Normal);
+  outs() << "!!!!!!!!!!!!!!!!!! Wooooooooosh !!!!!!!!!!!!!!!!!!\n";
+  outs().flush();
+  NDT.toOldDT(DT);
 }
 
 PreservedAnalyses LoopDeletionPass::run(Loop &L, LoopAnalysisManager &AM,
