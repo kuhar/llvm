@@ -211,6 +211,10 @@ int main(int argc, char **argv) {
 
   DT.dump();
 
+  DominatorTree ODT;
+  DT.toOldDT(ODT);
+  ODT.print(outs());
+
   Optional<InputGraph::CFGUpdate> Update;
   while ((Update = Graph->applyUpdate())) {
     if (Update->action == InputGraph::Op::Insert)
