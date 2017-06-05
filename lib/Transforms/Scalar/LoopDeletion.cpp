@@ -211,7 +211,6 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   assert(Preheader && "Preheader should exist!");
 
   NewDomTree NDT(DT.getRootNode()->getBlock());
-  NDT.verifyAll(true);
 
   // Now that we know the removal is safe, remove the loop by changing the
   // branch from the preheader to go to the single exit block.
@@ -259,7 +258,7 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
 
   NDT.deleteArc(Preheader, L->getHeader());
   NDT.insertArc(Preheader, ExitBlock);
-  NDT.verifyAll(true);
+  NDT.verify(NewDomTree::Verification::Normal);
 
   // Update the dominator tree and remove the instructions and blocks that will
   // be deleted from the reference counting scheme.
@@ -299,6 +298,8 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
 
   // The last step is to update LoopInfo now that we've eliminated this loop.
   LI.markAsRemoved(L);
+
+  NDT.verify(NewDomTree::Verification::Normal);
 }
 
 PreservedAnalyses LoopDeletionPass::run(Loop &L, LoopAnalysisManager &AM,
