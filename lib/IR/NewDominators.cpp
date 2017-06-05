@@ -504,6 +504,25 @@ void NewDomTree::recomputeInOutNums() const {
   isInOutValid = true;
 }
 
+void NewDomTree::toOldDT(DominatorTree &DT) const {
+  DT.setNewRoot(root);
+
+  std::vector<std::pair<Index, Node>> LevelsNodes;
+  LevelsNodes.reserve(levels.size());
+
+  for (auto NodeToLevel : levels)
+    LevelsNodes.push_back({NodeToLevel.second, NodeToLevel.first});
+
+  std::sort(LevelsNodes.begin(), LevelsNodes.end());
+
+  for (auto LN : LevelsNodes)
+    if (LN.second != root)
+      DT.addNewBlock(LN.second, getIDom(LN.second));
+
+  DT.updateDFSNumbers();
+  DT.verifyDomTree();
+}
+
 bool NewDomTree::verify(Verification VerificationLevel) const {
   assert(VerificationLevel != Verification::None);
   bool IsCorrect = true;

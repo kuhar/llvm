@@ -29,6 +29,7 @@
 
 namespace llvm {
 
+class DominatorTree;
 class Function;
 class Instruction;
 class Module;
@@ -47,7 +48,7 @@ struct NodeByName {
 };
 
 class NewDomTree {
- public:
+public:
   NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
 
   bool contains(Node N) const;
@@ -59,6 +60,8 @@ class NewDomTree {
 
   void insertArc(Node From, Node To);
   void deleteArc(Node From, Node To);
+
+  void toOldDT(DominatorTree& DT) const;
 
   enum Verification : unsigned {
     None    = 0,
@@ -88,7 +91,7 @@ class NewDomTree {
   void dumpLegacyDomTree() const;
 
  private:
-  Node root;
+  Node root = nullptr;
   DenseMap<Node, Node> idoms;
   DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
