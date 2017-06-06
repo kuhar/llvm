@@ -134,5 +134,9 @@ int main(int argc, char **argv) {
 
   if (NewDT) RunNew(*M);
 
+  if (OldDT) RunOld(*M);
+
+  if (NewDT) RunNew(*M);
+
   return 0;
 }

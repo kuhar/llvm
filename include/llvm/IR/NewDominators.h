@@ -96,6 +96,7 @@ public:
   DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
   DenseMap<Node, Node> preorderParents;
+  DenseMap<Node, SmallVector<Node, 8>> children;
   mutable DenseMap<Node, std::pair<Index, Index>> inOutNums;
   mutable bool isInOutValid = false;
 
@@ -105,9 +106,9 @@ public:
       SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
 
   struct DFSNodeInfo {
+    SmallVector<Node, 8> Predecessors;
     Index Num;
     Node Parent;
-    SmallVector<Node, 4> Predecessors;
   };
 
   struct DFSResult {
@@ -142,6 +143,9 @@ public:
     SmallVector<Node, 8> visitedNotAffectedQueue;
   };
 
+  void addChild(Node N, Node Child);
+  void removeChild(Node N, Node Child);
+  void setIDom(Node N, Node NewIDom);
   Node getSDomCandidate(Node Start, Node Pred, DFSResult &DFS,
                         DenseMap<Node, Node> &Labels);
 
@@ -168,7 +172,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
   DFSResult Res;
   Res.nextDFSNum = 0;
   DenseSet<Node> Visited;
-  std::vector<Node> WorkList;
+  SmallVector<Node, 16> WorkList;
 
   Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);

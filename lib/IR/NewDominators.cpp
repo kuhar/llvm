@@ -139,6 +139,33 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
   return Label[Pred];
 }
 
+void NewDomTree::addChild(Node N, Node Child) {
+  auto &Children = children[N];
+  assert(std::find(Children.begin(), Children.end(), Child) == Children.end());
+  Children.push_back(Child);
+}
+
+void NewDomTree::removeChild(Node N, Node Child) {
+  auto &Children = children[N];
+  auto it = std::find(Children.begin(), Children.end(), Child);
+  assert(it != Children.end());
+  std::swap(*it, Children.back());
+  Children.pop_back();
+}
+
+void NewDomTree::setIDom(Node N, Node NewIDom) {
+  auto it = idoms.find(N);
+  if (it != idoms.end()) {
+    if (it->second == NewIDom)
+      return;
+    else
+      removeChild(it->second, N);
+  }
+
+  idoms[N] = NewIDom;
+  addChild(NewIDom, N);
+}
+
 void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
   auto &Lvls = levels;  // Don't capture `this`.
   auto LevelDescender = [MinLevel, &Lvls](Node, Node To) -> bool {  // CLion...
