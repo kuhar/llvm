@@ -104,12 +104,16 @@ public:
       Node Root, Node Incoming,
       SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
 
+  struct DFSNodeInfo {
+    Index Num;
+    Node Parent;
+    SmallVector<Node, 4> Predecessors;
+  };
+
   struct DFSResult {
     Index nextDFSNum = 0;
-    DenseMap<Node, Index> nodeToNum;
-    DenseMap<Index, Node> numToNode;
-    DenseMap<Node, Node> parent;
-    DenseMap<Node, SmallVector<Node, 4>> predecessors;
+    std::vector<Node> numToNode;
+    DenseMap<Node, DFSNodeInfo> NodeToInfo;
 
     void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
   };
@@ -166,7 +170,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
   DenseSet<Node> Visited;
   std::vector<Node> WorkList;
 
-  Res.parent[Start] = nullptr;
+  Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);
 
   // Compute preorder numbers nad parents.
@@ -175,17 +179,19 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
     WorkList.pop_back();
     if (Visited.count(BB) != 0) continue;
 
-    Res.nodeToNum[BB] = Res.nextDFSNum;
-    Res.numToNode[Res.nextDFSNum] = BB;
+    auto &BBInfo = Res.NodeToInfo[BB];
+    BBInfo.Num = Res.nextDFSNum;
+    Res.numToNode.push_back(BB);
     ++Res.nextDFSNum;
     Visited.insert(BB);
     for (auto *Succ : reverse(successors(BB))) {
+      auto &SuccInfo = Res.NodeToInfo[Succ];
       if (Succ != BB)
-        Res.predecessors[Succ].push_back(BB);
+        SuccInfo.Predecessors.push_back(BB);
       if (Visited.count(Succ) == 0)
         if (Condition(BB, Succ)) {
           WorkList.push_back(Succ);
-          Res.parent[Succ] = BB;
+          SuccInfo.Parent = BB;
         }
     }
   }

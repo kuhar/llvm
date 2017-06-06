@@ -37,7 +37,7 @@ static cl::opt<bool> VerifySiblingProperty("verify-sibling-property",
 
 void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
                          const Node AttachTo /* = nullptr */) {
-  assert(DFS.nodeToNum.count(Root) != 0);
+  assert(DFS.NodeToInfo.count(Root) != 0 && "DFS not run?");
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
 
   DenseMap<Node, Node> Label;
@@ -50,7 +50,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   // Step 0: initialize data structures.
   for (Index i = 0; i <= LastNum; ++i) {
     auto N = DFS.numToNode[i];
-    idoms[N] = DFS.parent[N];
+    idoms[N] = DFS.NodeToInfo[N].Parent;
     SDoms[N] = N;
     Label[N] = N;
   }
@@ -64,17 +64,18 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
     auto CurrentNode = DFS.numToNode[i];
-    for (auto PredNode : DFS.predecessors[CurrentNode]) {
+    auto &CurrentNodeInfo = DFS.NodeToInfo[CurrentNode];
+    for (auto PredNode : CurrentNodeInfo.Predecessors) {
       if (PredNode == CurrentNode) continue;
 
       // Incoming arc from an unreachable node.
-      if (DFS.nodeToNum.count(PredNode) == 0) continue;
+      if (DFS.NodeToInfo.count(PredNode) == 0) continue;
 
       if (levels[PredNode] < MinLevel) continue;
 
       Node SDomCandidate = getSDomCandidate(CurrentNode, PredNode, DFS, Label);
-      if (DFS.nodeToNum[SDoms[CurrentNode]] >
-          DFS.nodeToNum[SDoms[SDomCandidate]]) {
+      if (DFS.NodeToInfo[SDoms[CurrentNode]].Num >
+          DFS.NodeToInfo[SDoms[SDomCandidate]].Num) {
         SDoms[CurrentNode] = SDoms[SDomCandidate];
         rdoms[CurrentNode] = SDomCandidate;
       }
@@ -91,7 +92,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
     const auto CurrentNode = DFS.numToNode[i];
     const auto SDom = SDoms[CurrentNode];
     auto IDomCandidate = idoms[CurrentNode];
-    while (DFS.nodeToNum[IDomCandidate] > DFS.nodeToNum[SDom])
+    while (DFS.NodeToInfo[IDomCandidate].Num > DFS.NodeToInfo[SDom].Num)
       IDomCandidate = idoms[IDomCandidate];
 
     idoms[CurrentNode] = IDomCandidate;
@@ -108,27 +109,31 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
 Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
                                   DFSResult &DFS, DenseMap<Node, Node> &Label) {
   assert(Pred != Start && "Not a predecessor");
-  const Index StartNum = DFS.nodeToNum[Start];
-  const Index PredNum = DFS.nodeToNum[Pred];
+  const Index StartNum = DFS.NodeToInfo[Start].Num;
+  const Index PredNum = DFS.NodeToInfo[Pred].Num;
 
   if (PredNum < StartNum) return Pred;
 
   Node Next = Pred;
+  DFSNodeInfo *NextInfo = &DFS.NodeToInfo[Next];
   SmallVector<Node, 8> SDomPath;
   // Walk the SDom path up the spanning tree.
   do {
     SDomPath.push_back(Next);
-    Next = DFS.parent[Next];
-  } while (DFS.nodeToNum[Next] > StartNum);
+    Next = NextInfo->Parent;
+    NextInfo = &DFS.NodeToInfo[Next];
+  } while (NextInfo->Num > StartNum);
 
   // Compress path.
   for (auto i = SDomPath.size() - 2; i < SDomPath.size(); --i) {
     const auto Current = SDomPath[i];
     const auto Parent = SDomPath[i + 1];
 
-    if (DFS.nodeToNum[Label[Current]] > DFS.nodeToNum[Label[Parent]])
+
+    if (DFS.NodeToInfo[Label[Current]].Num > DFS.NodeToInfo[Label[Parent]].Num)
       Label[Current] = Label[Parent];
-    DFS.parent[Current] = DFS.parent[Parent];
+
+    DFS.NodeToInfo[Current].Parent = DFS.NodeToInfo[Parent].Parent;
   }
 
   return Label[Pred];
@@ -142,7 +147,8 @@ void NewDomTree::computeReachableDominators(Node Root, Index MinLevel) {
   };
 
   auto DFSRes = runDFS(root, LevelDescender);
-  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
+  for (auto &NodeToInfo : DFSRes.NodeToInfo)
+    preorderParents.insert({NodeToInfo.first, NodeToInfo.second.Parent});
   DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, Root, MinLevel);
@@ -165,7 +171,8 @@ void NewDomTree::computeUnreachableDominators(
   };
 
   auto DFSRes = runDFS(Root, UnreachableDescender);
-  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
+  for (auto &NodeToInfo : DFSRes.NodeToInfo)
+    preorderParents.insert({NodeToInfo.first, NodeToInfo.second.Parent});
   DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, Root, /* MinLevel = */ 0, Incoming);
@@ -415,8 +422,8 @@ void NewDomTree::deleteReachable(Node From, Node To) {
 
   auto DFSRes = runDFS(IDomTo, DescendBelow);
   DEBUG(DFSRes.dumpDFSNumbering());
-  preorderParents.insert(DFSRes.parent.begin(), DFSRes.parent.end());
-
+  for (auto &NodeToInfo : DFSRes.NodeToInfo)
+    preorderParents.insert({NodeToInfo.first, NodeToInfo.second.Parent});
   DEBUG(dbgs() << "Running SNCA\n");
   semiNCA(DFSRes, IDomTo, Level, PrevIDomSubTree);
 }
@@ -646,11 +653,11 @@ bool NewDomTree::verifyReachability() const {
   bool Correct = true;
 
   auto DFSRes = runDFS(root, [] (Node, Node) { return true; });
-  for (auto NodeToNum : DFSRes.nodeToNum)
-    if (!contains(NodeToNum.first)) {
+  for (auto NodeToInfo : DFSRes.NodeToInfo)
+    if (!contains(NodeToInfo.first)) {
       errs() << "=================== Incorrect domtree! ===============\n";
       errs() << "DFS walk found a node not present in the DomTree "
-             << NodeToNum.first->getName() << "\n";
+             << NodeToInfo.first->getName() << "\n";
 
       dumpIDoms(errs());
       Correct = false;
@@ -673,7 +680,7 @@ bool NewDomTree::verifyParentProperty() const {
 
     auto SkipIDom = [&] (Node, Node Succ) { return Succ != IDom; };
     auto DFSRes = runDFS(root, SkipIDom);
-    if (DFSRes.nodeToNum.count(Target)) {
+    if (DFSRes.NodeToInfo.count(Target)) {
       errs() << "=================== Incorrect domtree! ===============\n";
       errs() << "DFS walk found a path from " << root->getName()
              << " to " << Target->getName() << " skipping its idom "
@@ -707,7 +714,7 @@ bool NewDomTree::verifySiblingProperty() const {
 
         auto SkipSibling = [&](Node, Node Succ) { return Succ != S; };
         auto DFSRes = runDFS(root, SkipSibling);
-        if (DFSRes.nodeToNum.count(N) == 0) {
+        if (DFSRes.NodeToInfo.count(N) == 0) {
           errs() << "=================== Incorrect domtree! ===============\n";
           errs() << "DFS walk didn't find a path from " << root->getName()
                  << " to " << N->getName() << " skipping its sibling "
@@ -767,18 +774,17 @@ const auto Level = LevelIt->second;
 
 void NewDomTree::DFSResult::dumpDFSNumbering(raw_ostream &OS) const {
   OS << "\nDFSNumbering:\n";
-  OS << "\tnodeToNum size:\t" << nodeToNum.size() << "\n";
-  OS << "\tparents size:\t" << parent.size() << "\n";
+  OS << "\tNodeToInfo size:\t" << NodeToInfo.size() << "\n";
 
-  using KeyValue = std::pair<Node, Index>;
-  std::vector<KeyValue> Sorted(nodeToNum.begin(), nodeToNum.end());
+  using KeyValue = std::pair<Node, DFSNodeInfo>;
+  std::vector<KeyValue> Sorted(NodeToInfo.begin(), NodeToInfo.end());
 
   sort(Sorted.begin(), Sorted.end(), [](KeyValue first, KeyValue second) {
-    return first.second < second.second;
+    return first.second.Num < second.second.Num;
   });
 
-  for (const auto &NodeToNum : Sorted)
-    OS << NodeToNum.first->getName() << " {" << NodeToNum.second << "}\n";
+  for (const auto &NodeToInfo : Sorted)
+    OS << NodeToInfo.first->getName() << " {" << NodeToInfo.second.Num << "}\n";
 }
 
 void NewDomTree::dumpIDoms(raw_ostream &OS) const {
