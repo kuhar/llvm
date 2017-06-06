@@ -35,11 +35,62 @@ class Instruction;
 class Module;
 class raw_ostream;
 
-using Node = BasicBlock *;
-using Index = unsigned;
+class DTNode {
+public:
+  using BlockTy = BasicBlock *;
+  using Index = unsigned;
+
+  BlockTy getBlock() const { return BB; }
+  DTNode *getIDom() const { return IDom; }
+  Index getLevel() const { return Level; }
+  Index getInNum() const { return InNum; }
+  Index getOutNum() const { return OutNum; }
+
+  using ChildrenTy = SmallVector<DTNode *, 4>;
+  using iterator = typename ChildrenTy::iterator;
+  using const_iterator = typename ChildrenTy::const_iterator;
+
+  iterator begin() { return Children.begin(); }
+  iterator end() { return Children.end(); }
+  const_iterator begin() const { return Children.begin(); }
+  const_iterator end() const { return Children.end(); }
+  size_t getNumChildren() const { return Children.size(); }
+
+  bool hasChild(DTNode *Child) const {
+    return std::find(begin(), end(), Child) != Children.end();
+  }
+
+  bool hasChild(BlockTy ChildBB) const {
+    return std::find_if(begin(), end(), [ChildBB] (DTNode* C) {
+      return C->BB == ChildBB;
+    }) != Children.end();
+  }
+
+  StringRef getName() const { return BB->getName(); }
+  void dump(raw_ostream &OS = dbgs()) const;
+
+private:
+  friend class NewDomTree;
+  DTNode(BlockTy Block) : BB(Block) {}
+
+void setIDom(DTNode *NewIDom);
+
+  BasicBlock *BB;
+  DTNode *IDom = nullptr;
+  Index Level = 0;
+  ChildrenTy Children;
+  DTNode *RDom = nullptr;
+  DTNode *PreorderParent = nullptr;
+  mutable Index InNum = 0;
+  mutable Index OutNum = 0;
+
+  void addChild(DTNode *Child);
+  void removeChild(DTNode *Child);
+};
+
 
 struct NodeByName {
-  bool operator()(const Node first, const Node second) const {
+  bool operator()(const BlockTy first, const BlockTy second) const {
     const auto Cmp = first->getName().compare_numeric(second->getName());
     if (Cmp == 0) return less{}(first, second);
 
@@ -49,17 +100,20 @@ struct NodeByName {
 
 class NewDomTree {
 public:
-  NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
+  using BlockTy = DTNode::BlockTy;
+  using Index = DTNode::Index;
+  NewDomTree(BlockTy Root) : root(Root) { computeReachableDominators(root, 0); }
 
-  bool contains(Node N) const;
-  Node getIDom(Node N) const;
-  Index getLevel(Node N) const;
-  Node findNCA(Node First, Node Second) const;
+  bool contains(BlockTy B) const;
+  DTNode *getNode(BlockTy B);
+  const DTNode *getNode(BlockTy B) const;
 
-  bool dominates(Node Src, Node Dst) const;
+  BlockTy findNCA(DTNode *First, DTNode *Second) const;
 
-  void insertArc(Node From, Node To);
-  void deleteArc(Node From, Node To);
+  bool dominates(DTNode *Src, DTNode *Dst) const;
+
+  void insertArc(BlockTy From, BlockTy To);
+  void deleteArc(BlockTy From, BlockTy To);
 
   void toOldDT(DominatorTree& DT) const;
 
@@ -82,8 +136,8 @@ public:
   bool verifyParentProperty() const;
   bool verifySiblingProperty() const;
 
-  void print(raw_ostream &OS) const;
-  void dump() const { print(dbgs()); }
+  void print(DTNode *Start, raw_ostream &OS) const;
+  void dump(raw_ostream &OS = dbgs()) const { print(Root, OS); }
   void dumpIDoms(raw_ostream &OS = dbgs()) const;
   void dumpLevels(raw_ostream &OS = dbgs()) const;
   void addDebugInfoToIR();
@@ -91,37 +145,39 @@ public:
   void dumpLegacyDomTree() const;
 
  private:
-  Node root = nullptr;
-  DenseMap<Node, Node> idoms;
-  DenseMap<Node, Node> rdoms;
-  DenseMap<Node, Index> levels;
-  DenseMap<Node, Node> preorderParents;
-  mutable DenseMap<Node, std::pair<Index, Index>> inOutNums;
+  DTNode *Entry = nullptr;
+  DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;
   mutable bool isInOutValid = false;
 
-  void computeReachableDominators(Node Root, Index MinLevel);
-  void computeUnreachableDominators(
-      Node Root, Node Incoming,
-      SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
+  DTNode *addNode(BlockTy BB);
+  DTNode *getOrAddNode(BlockTy BB);
+
+  void computeReachableDominators(DTNode *Root, Index MinLevel);
+  void computeUnreachableDominators(BTNode *Root, BlockTy Incoming,
+      SmallVectorImpl<std::pair<BlockTy, BlockTy>> &DiscoveredConnectingArcs);
+
+  struct DFSInfo {
+    Index Num;
+    BlockTy Parent;
+    SmallVector<BlockTy, 4> Predecessors;
+  };
 
   struct DFSResult {
-    Index nextDFSNum = 0;
-    DenseMap<Node, Index> nodeToNum;
-    DenseMap<Index, Node> numToNode;
-    DenseMap<Node, Node> parent;
-    DenseMap<Node, SmallVector<Node, 4>> predecessors;
+    Index NextDFSNum = 0;
+    DenseMap<BlockTy, DFSInfo> NodeToInfo;
+    std::vector<BlockTy> NumToNode;
 
     void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
   };
 
   template <typename DescendCondition>
-  static DFSResult runDFS(Node Start, DescendCondition Condition);
+  static DFSResult runDFS(BlockTy Start, DescendCondition Condition);
 
-  void semiNCA(DFSResult &DFS, Node Root, Index MinLevel,
-               Node AttachTo = nullptr);
+  void semiNCA(DFSResult &DFS, BlockTy Root, Index MinLevel,
+               BlockTy AttachTo = nullptr);
 
   struct InsertionInfo {
-    using BucketElementTy = std::pair<Index, Node>;
+    using BucketElementTy = std::pair<Index, BlockTy>;
     struct DecreasingLevel {
       bool operator()(const BucketElementTy &First,
                       const BucketElementTy &Second) const {
@@ -132,60 +188,59 @@ public:
     std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
                         DecreasingLevel>
         bucket;
-    DenseSet<Node> affected;
-    DenseSet<Node> visited;
-    SmallVector<Node, 8> affectedQueue;
-    SmallVector<Node, 8> visitedNotAffectedQueue;
+    DenseSet<BlockTy> affected;
+    DenseSet<BlockTy> visited;
+    SmallVector<BlockTy, 8> affectedQueue;
+    SmallVector<BlockTy, 8> visitedNotAffectedQueue;
   };
 
-  Node getSDomCandidate(Node Start, Node Pred, DFSResult &DFS,
-                        DenseMap<Node, Node> &Labels);
+  BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
+                           DenseMap<BlockTy, BlockTy> &Labels);
 
-  void insertUnreachable(Node From, Node To);
-  void insertReachable(Node From, Node To);
-  void visitInsertion(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
-  void updateInsertion(Node NCA, InsertionInfo &II);
+  void insertUnreachable(BlockTy From, BlockTy To);
+  void insertReachable(BlockTy From, BlockTy To);
+  void visitInsertion(BlockTy N, Index RootLevel, BlockTy NCA,
+                      InsertionInfo &II);
+  void updateInsertion(BlockTy NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
 
-  bool isReachableFromIDom(Node N);
-  void deleteReachable(Node From, Node To);
-  void deleteUnreachable(Node To);
+  bool isReachableFromIDom(BlockTy N);
+  void deleteReachable(BlockTy From, BlockTy To);
+  void deleteUnreachable(BlockTy To);
 
   void recomputeInOutNums() const;
-
-  using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
-  void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
-                 std::set<Node, NodeByName> &ToPrint) const;
 };
 
 template <typename DescendCondition>
-NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
+NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
                                          DescendCondition Condition) {
   DFSResult Res;
-  Res.nextDFSNum = 0;
-  DenseSet<Node> Visited;
-  std::vector<Node> WorkList;
+  Res.NextDFSNum = 0;
+  DenseSet<BlockTy> Visited;
+  std::vector<BlockTy> WorkList;
 
-  Res.parent[Start] = nullptr;
+  Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);
 
-  // Compute preorder numbers nad parents.
+  // Compute preorder numbers and parents.
   while (!WorkList.empty()) {
-    BasicBlock *BB = WorkList.back();
+    BlockTy BB = WorkList.back();
     WorkList.pop_back();
     if (Visited.count(BB) != 0) continue;
 
-    Res.nodeToNum[BB] = Res.nextDFSNum;
-    Res.numToNode[Res.nextDFSNum] = BB;
+    Res.NodeToInfo[BB].Num = Res.NextDFSNum;
+    Res.NumToNode.push_back(BB);
     ++Res.nextDFSNum;
     Visited.insert(BB);
+
     for (auto *Succ : reverse(successors(BB))) {
+      DFSInfo &SuccInfo = Res.NodeToInfo[Succ];
       if (Succ != BB)
-        Res.predecessors[Succ].push_back(BB);
+        SuccInfo.Predecessors.push_back(BB);
       if (Visited.count(Succ) == 0)
         if (Condition(BB, Succ)) {
           WorkList.push_back(Succ);
-          Res.parent[Succ] = BB;
+          SuccInfo.Parent = BB;
         }
     }
   }
