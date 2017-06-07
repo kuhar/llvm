@@ -50,9 +50,19 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
   // Step 0: initialize data structures.
   for (Index i = 0; i <= LastNum; ++i) {
     auto N = DFS.numToNode[i];
-    idoms[N] = DFS.NodeToInfo[N].Parent;
+    if (N != Root)
+      idoms[N] = DFS.NodeToInfo[N].Parent;
+    children[N].clear();
     SDoms[N] = N;
     Label[N] = N;
+  }
+
+
+  if (AttachTo) {
+    // Detach from previous idom.
+    const auto RootIDomIt = idoms.find(Root);
+    if (RootIDomIt != idoms.end() && hasChild(RootIDomIt->second, Root))
+      removeChild(RootIDomIt->second, Root);
   }
 
   idoms[Root] = Root;
@@ -96,12 +106,23 @@ void NewDomTree::semiNCA(DFSResult &DFS, Node Root, const Index MinLevel,
       IDomCandidate = idoms[IDomCandidate];
 
     idoms[CurrentNode] = IDomCandidate;
+    DEBUG(dbgs() << "addChild(" << IDomCandidate->getName() << ", "
+                 << CurrentNode->getName() << ")\n");
+    DEBUG(dbgs().flush());
+    addChild(IDomCandidate, CurrentNode);
     levels[CurrentNode] = levels[IDomCandidate] + 1;
   }
 
   if (!AttachTo) return;
 
-  idoms[Root] = AttachTo;
+  DEBUG(dbgs() << "Attaching Root " << Root->getName() << " to "
+               << AttachTo->getName() << "\n");
+
+  auto RootIDomIt = idoms.find(Root);
+  if (RootIDomIt->second != AttachTo) {
+    idoms[Root] = AttachTo;
+    addChild(AttachTo, Root);
+  }
   rdoms[Root] = AttachTo;
 }
 
@@ -139,6 +160,13 @@ Node NewDomTree::getSDomCandidate(const Node Start, const Node Pred,
   return Label[Pred];
 }
 
+bool NewDomTree::hasChild(Node N, Node Child) const {
+  auto ChildrenIt = children.find(N);
+  assert(ChildrenIt != children.end());
+  auto &Children = ChildrenIt->second;
+  return std::find(Children.begin(), Children.end(), Child) != Children.end();
+}
+
 void NewDomTree::addChild(Node N, Node Child) {
   auto &Children = children[N];
   assert(std::find(Children.begin(), Children.end(), Child) == Children.end());
@@ -154,6 +182,9 @@ void NewDomTree::removeChild(Node N, Node Child) {
 }
 
 void NewDomTree::setIDom(Node N, Node NewIDom) {
+  DEBUG(dbgs() << "setIDom(" << N->getName() << ", " << NewIDom->getName()
+               << ")\n");
+  DEBUG(dbgs().flush());
   auto it = idoms.find(N);
   if (it != idoms.end()) {
     if (it->second == NewIDom)
@@ -361,7 +392,7 @@ void NewDomTree::updateInsertion(Node NCA, InsertionInfo &II) {
   for (const Node N : II.affectedQueue) {
     DEBUG(dbgs() << "\tidoms[" << N->getName() << "] = " << NCA->getName()
                  << "\n");
-    idoms[N] = NCA;
+    setIDom(N, NCA);
     DEBUG(dbgs() << "\tlevels[" << N->getName() << "] = " << levels[NCA]
                  << " + 1\n");
     levels[N] = levels[NCA] + 1;
@@ -481,15 +512,18 @@ void NewDomTree::deleteUnreachable(Node To) {
     if (NCA != N && getLevel(NCA) < getLevel(MinNode)) MinNode = NCA;
   }
 
-  for (Index i = 0; i < DFSRes.nextDFSNum; ++i) {
+  for (Index i = DFSRes.nextDFSNum - 1; i < DFSRes.nextDFSNum; --i) {
     const Node N = DFSRes.numToNode[i];
     DEBUG(dbgs() << "Erasing node info "  << N->getName()
                  << " (level " << levels[N] << ", idom "
                  << idoms[N]->getName() << ")\n");
+
+    removeChild(idoms[N], N);
     idoms.erase(N);
     rdoms.erase(N);
     levels.erase(N);
     preorderParents.erase(N);
+    children[N].clear();
   }
 
   if (MinNode == To) return;
@@ -771,7 +805,14 @@ void NewDomTree::print(raw_ostream &OS) const {
 
   OS << "\nNew Dominator Tree:\n";
   while (!ToPrint.empty()) printImpl(OS, root, Children, ToPrint);
-  OS << "\n";
+  OS << "\nChildren:\n";
+
+  for (auto &NodeToChildren : children) {
+    OS << "\t" << NodeToChildren.first->getName() << " [";
+    for (auto Child : NodeToChildren.second)
+      OS << Child->getName() << ", ";
+    OS << "]\n";
+  }
 }
 
 void NewDomTree::printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,

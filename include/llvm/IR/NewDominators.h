@@ -96,7 +96,7 @@ public:
   DenseMap<Node, Node> rdoms;
   DenseMap<Node, Index> levels;
   DenseMap<Node, Node> preorderParents;
-  DenseMap<Node, SmallVector<Node, 8>> children;
+  DenseMap<Node, SmallVector<Node, 6>> children;
   mutable DenseMap<Node, std::pair<Index, Index>> inOutNums;
   mutable bool isInOutValid = false;
 
@@ -143,6 +143,7 @@ public:
     SmallVector<Node, 8> visitedNotAffectedQueue;
   };
 
+  bool hasChild(Node N, Node Child) const;
   void addChild(Node N, Node Child);
   void removeChild(Node N, Node Child);
   void setIDom(Node N, Node NewIDom);
