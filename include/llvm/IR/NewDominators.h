@@ -56,7 +56,7 @@ public:
   Index getInNum() const { return InNum; }
   Index getOutNum() const { return OutNum; }
 
-  using ChildrenTy = SmallVector<DTNode *, 4>;
+  using ChildrenTy = SmallVector<DTNode *, 8>;
   using iterator = typename ChildrenTy::iterator;
   using const_iterator = typename ChildrenTy::const_iterator;
 
@@ -179,8 +179,8 @@ public:
 
   void computeReachableDominators(BlockTy Root, Index MinLevel);
   void computeUnreachableDominators(
-      BlockTy Root, BlockTy Incoming,
-      SmallVectorImpl<std::pair<BlockTy, BlockTy>> &DiscoveredConnectingArcs);
+      BlockTy Root, DTNode *Incoming,
+      SmallVectorImpl<std::pair<BlockTy, DTNode *>> &DiscoveredConnectingArcs);
 
   struct DFSNodeInfo {
     SmallVector<BlockTy, 8> Predecessors;
@@ -203,7 +203,7 @@ public:
                DTNode *AttachTo = nullptr);
 
   struct InsertionInfo {
-    using BucketElementTy = std::pair<Index, BlockTy>;
+    using BucketElementTy = std::pair<Index, DTNode *>;
     struct DecreasingLevel {
       bool operator()(const BucketElementTy &First,
                       const BucketElementTy &Second) const {
@@ -214,29 +214,27 @@ public:
     std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
                         DecreasingLevel>
         bucket;
-    DenseSet<BlockTy> affected;
-    DenseSet<BlockTy> visited;
-    SmallVector<BlockTy, 8> affectedQueue;
-    SmallVector<BlockTy, 8> visitedNotAffectedQueue;
+    DenseSet<DTNode *> affected;
+    DenseSet<DTNode *> visited;
+    SmallVector<DTNode *, 8> affectedQueue;
+    SmallVector<DTNode *, 8> visitedNotAffectedQueue;
   };
 
   BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
                         DenseMap<BlockTy, BlockTy> &Labels);
 
-  void insertUnreachable(BlockTy From, BlockTy To);
-  void insertReachable(BlockTy From, BlockTy To);
+  void insertUnreachable(DTNode *FromTN, BlockTy To);
+  void insertReachable(DTNode *FromTN, DTNode *ToTN);
   void visitInsertion(DTNode *N, Index RootLevel, DTNode *NCA,
                       InsertionInfo &II);
   void updateInsertion(DTNode *NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
 
   bool isReachableFromIDom(DTNode *N);
-  void deleteReachable(BlockTy From, BlockTy To);
-  void deleteUnreachable(BlockTy To);
+  void deleteReachable(DTNode *FromTN, DTNode *ToTN);
+  void deleteUnreachable(DTNode *ToTN);
 
   void recomputeInOutNums() const;
-
-  using ChildrenTy = DenseMap<BlockTy, SmallVector<BlockTy, 8>>;
   void printImpl(raw_ostream &OS, const DTNode *TN) const;
 };
 

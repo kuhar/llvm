@@ -31,6 +31,8 @@ using namespace llvm;
 
 static cl::opt<std::string> InputFile(cl::Positional, cl::desc("<input file>"),
                                       cl::Required);
+static cl::opt<unsigned> Iterations("i", cl::desc("No iterations"),
+                                    cl::init(1));
 
 static cl::opt<bool> OldDT("old", cl::desc("Test old DT"));
 static cl::opt<bool> NewDT("new", cl::desc("Test new DT"));
@@ -130,13 +132,11 @@ int main(int argc, char **argv) {
   if (VerifyDomInfo)
     outs() << "=== Verification on ===\n";
 
-  if (OldDT) RunOld(*M);
+  if (OldDT)
+    for (unsigned i = 0; i < Iterations; ++i) RunOld(*M);
 
-  if (NewDT) RunNew(*M);
-
-  if (OldDT) RunOld(*M);
-
-  if (NewDT) RunNew(*M);
+  if (NewDT)
+    for (unsigned i = 0; i < Iterations; ++i) RunNew(*M);
 
   return 0;
 }
