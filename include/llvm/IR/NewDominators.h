@@ -180,8 +180,7 @@ private:
   };
 
   struct DFSResult {
-    Index nextDFSNum = 0;
-    std::vector<BlockTy> numToNode;
+    std::vector<BlockTy> NumToNode;
     DenseMap<BlockTy, DFSNodeInfo> NodeToInfo;
 
     void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
@@ -190,8 +189,7 @@ private:
   template <typename DescendCondition>
   static DFSResult runDFS(BlockTy Start, DescendCondition Condition);
 
-  void semiNCA(DFSResult &DFS, BlockTy Root, Index MinLevel,
-               DTNode *AttachTo = nullptr);
+  void semiNCA(DFSResult &DFS, Index MinLevel, DTNode *AttachTo = nullptr);
 
   struct InsertionInfo {
     using BucketElementTy = std::pair<Index, DTNode *>;
@@ -233,7 +231,7 @@ template <typename DescendCondition>
 NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
                                          DescendCondition Condition) {
   DFSResult Res;
-  Res.nextDFSNum = 0;
+  Index NextDFSNum = 0;
   DenseSet<BlockTy> Visited;
   SmallVector<BlockTy, 16> WorkList;
 
@@ -248,9 +246,9 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
       continue;
 
     auto &BBInfo = Res.NodeToInfo[BB];
-    BBInfo.Num = Res.nextDFSNum;
-    Res.numToNode.push_back(BB);
-    ++Res.nextDFSNum;
+    BBInfo.Num = NextDFSNum;
+    Res.NumToNode.push_back(BB);
+    ++NextDFSNum;
     Visited.insert(BB);
     for (auto *Succ : successors(BB)) {
       auto &SuccInfo = Res.NodeToInfo[Succ];

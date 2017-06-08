@@ -73,22 +73,26 @@ void DTNode::dump(raw_ostream &OS) const {
   OS << "]\n";
 }
 
-void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
+void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
                          DTNode *const AttachTo /* = nullptr */) {
-  assert(DFS.NodeToInfo.count(Root) != 0 && "DFS not run?");
-  assert(DFS.nextDFSNum > 0 && "DFS not run?");
+  const Index NextDFSNum = static_cast<Index>(DFS.NumToNode.size());
+  assert(NextDFSNum > 0 && "DFS not run?");
 
   DenseMap<BlockTy, BlockTy> Label;
+  Label.reserve(NextDFSNum);
   DenseMap<BlockTy, BlockTy> SDoms;
-  const Index LastNum = DFS.nextDFSNum - 1;
-  DEBUG(dbgs() << "StartNum: " << 0 << ": " << Root->getName() << "\n");
+  SDoms.reserve(NextDFSNum);
+  const Index LastNum = NextDFSNum - 1;
+  DEBUG(dbgs() << "StartNum: " << 0 << ": "
+               << DFS.NumToNode.back()->getName() << "\n");
   DEBUG(dbgs() << "LastNum: " << LastNum << ": "
-               << DFS.numToNode[LastNum]->getName() << "\n");
+               << DFS.NumToNode.back()->getName() << "\n");
 
   // Step 0: initialize data structures.
+  const BlockTy Root = DFS.NumToNode.front();
   DTNode *RootTreeNode = nullptr;
   for (Index i = 0; i <= LastNum; ++i) {
-    auto N = DFS.numToNode[i];
+    auto N = DFS.NumToNode[i];
     DTNode *TreeN = getOrAddNode(N);
     if (N != Root)
       TreeN->IDom = getNode(DFS.NodeToInfo[N].Parent);
@@ -116,7 +120,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
 
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
-    BlockTy CurrentNode = DFS.numToNode[i];
+    BlockTy CurrentNode = DFS.NumToNode[i];
     auto &CurrentNodeInfo = DFS.NodeToInfo[CurrentNode];
     DTNode *CurrentTreeNode = getNode(CurrentNode);
 
@@ -148,7 +152,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
   // Note that IDoms were initialized to tree parents, so we don't need the
   // original Parents array.
   for (Index i = 1; i <= LastNum; ++i) {
-    const BlockTy CurrentNode = DFS.numToNode[i];
+    const BlockTy CurrentNode = DFS.NumToNode[i];
     DTNode *CurrentTreeNode = getNode(CurrentNode);
     const BlockTy SDom = SDoms[CurrentNode];
     DTNode *IDomCandidate = CurrentTreeNode->IDom;
@@ -167,7 +171,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
   if (!AttachTo)
     return;
 
-  DEBUG(dbgs() << "Attaching Root " << Root->getName() << " to "
+  DEBUG(dbgs() << "Attaching Root " << RootTreeNode->getName() << " to "
                << AttachTo->getName() << "\n");
 
   if (RootTreeNode->IDom != AttachTo) {
@@ -247,7 +251,7 @@ void NewDomTree::computeReachableDominators(BlockTy Root, Index MinLevel) {
 
   DEBUG(DFSRes.dumpDFSNumbering());
 
-  semiNCA(DFSRes, Root, MinLevel);
+  semiNCA(DFSRes, MinLevel);
 }
 
 void NewDomTree::computeUnreachableDominators(
@@ -275,7 +279,7 @@ void NewDomTree::computeUnreachableDominators(
 
   DEBUG(DFSRes.dumpDFSNumbering());
 
-  semiNCA(DFSRes, Root, /* MinLevel = */ 0, Incoming);
+  semiNCA(DFSRes, /* MinLevel = */ 0, Incoming);
 }
 
 bool NewDomTree::contains(BlockTy BB) const { return TreeNodes.count(BB) != 0; }
@@ -518,7 +522,7 @@ void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
       getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
   }
   DEBUG(dbgs() << "Running SNCA\n");
-  semiNCA(DFSRes, IDomTo->BB, Level, PrevIDomSubTree);
+  semiNCA(DFSRes, Level, PrevIDomSubTree);
 }
 
 void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
@@ -550,8 +554,9 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
       MinNode = NCA;
   }
 
-  for (Index i = DFSRes.nextDFSNum - 1; i < DFSRes.nextDFSNum; --i) {
-    const BlockTy N = DFSRes.numToNode[i];
+  const Index Size = static_cast<Index>(DFSRes.NumToNode.size());
+  for (Index i = Size - 1; i < Size; --i) {
+    const BlockTy N = DFSRes.NumToNode[i];
     DTNode *const TN = getNode(N);
     DEBUG(dbgs() << "Erasing node info " << N->getName() << " (level "
                  << TN->Level << ", idom " << TN->IDom->getName() << ")\n");
@@ -575,7 +580,7 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
   DEBUG(DFSRes.dumpDFSNumbering());
   DEBUG(dbgs() << "Previous idoms[MinNode] = " << PrevIDomMin->getName()
                << "\n");
-  semiNCA(DFSRes, MinNode->BB, MinLevel, PrevIDomMin);
+  semiNCA(DFSRes, MinLevel, PrevIDomMin);
 }
 
 void NewDomTree::recomputeInOutNums() const {
