@@ -15,9 +15,6 @@
 #ifndef LLVM_IR_NEW_DOMINATORS_H
 #define LLVM_IR_NEW_DOMINATORS_H
 
-#include <queue>
-#include <utility>
-#include <memory>
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/GraphTraits.h"
@@ -27,6 +24,9 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
+#include <memory>
+#include <queue>
+#include <utility>
 
 namespace llvm {
 
@@ -39,7 +39,8 @@ class raw_ostream;
 struct NodeByName {
   bool operator()(const BasicBlock *First, const BasicBlock *Second) const {
     const auto Cmp = First->getName().compare_numeric(Second->getName());
-    if (Cmp == 0) return less{}(First, Second);
+    if (Cmp == 0)
+      return less{}(First, Second);
 
     return Cmp < 0;
   }
@@ -66,33 +67,25 @@ public:
   const_iterator end() const { return Children.end(); }
   size_t getNumChildren() const { return Children.size(); }
 
-  iterator findChild(DTNode *Child) {
-    return std::find(begin(), end(), Child);
-  }
+  iterator findChild(DTNode *Child) { return std::find(begin(), end(), Child); }
 
   const_iterator findChild(DTNode *Child) const {
     return std::find(begin(), end(), Child);
   }
 
   iterator findChild(BlockTy ChildBB) {
-    return std::find_if(begin(), end(), [ChildBB] (DTNode* C) {
-      return C->BB == ChildBB;
-    });
+    return std::find_if(begin(), end(),
+                        [ChildBB](DTNode *C) { return C->BB == ChildBB; });
   }
 
   const_iterator findChild(BlockTy ChildBB) const {
-    return std::find_if(begin(), end(), [ChildBB] (DTNode* C) {
-      return C->BB == ChildBB;
-    });
+    return std::find_if(begin(), end(),
+                        [ChildBB](DTNode *C) { return C->BB == ChildBB; });
   }
 
-  bool hasChild(DTNode *Child) const {
-    return findChild(Child) != end();
-  }
+  bool hasChild(DTNode *Child) const { return findChild(Child) != end(); }
 
-  bool hasChild(BlockTy ChildBB) const {
-    return findChild(ChildBB) != end();
-  }
+  bool hasChild(BlockTy ChildBB) const { return findChild(ChildBB) != end(); }
 
   StringRef getName() const { return BB->getName(); }
   void dump(raw_ostream &OS = dbgs()) const;
@@ -116,7 +109,6 @@ private:
   void removeChild(DTNode *Child);
 };
 
-
 class NewDomTree {
 public:
   using BlockTy = DTNode::BlockTy;
@@ -128,7 +120,7 @@ public:
 
   bool contains(BlockTy N) const;
 
-  DTNode *getNode(BlockTy BB) const  {
+  DTNode *getNode(BlockTy BB) const {
     const auto it = TreeNodes.find(BB);
     assert(it != TreeNodes.end());
     return it->second.get();
@@ -141,17 +133,16 @@ public:
   void insertArc(BlockTy From, BlockTy To);
   void deleteArc(BlockTy From, BlockTy To);
 
-  void toOldDT(DominatorTree& DT) const;
+  void toOldDT(DominatorTree &DT) const;
 
   enum Verification : unsigned {
-    None    = 0,
-    Basic   = 1,
-    CFG     = 2,
+    None = 0,
+    Basic = 1,
+    CFG = 2,
     Sibling = 4,
-    OldDT   = 8,
-    Normal  = unsigned(Basic) | unsigned(CFG) | unsigned(OldDT),
-    Full    = unsigned(Basic) | unsigned(CFG) | unsigned(Sibling) |
-              unsigned(OldDT)
+    OldDT = 8,
+    Normal = unsigned(Basic) | unsigned(CFG) | unsigned(OldDT),
+    Full = unsigned(Basic) | unsigned(CFG) | unsigned(Sibling) | unsigned(OldDT)
   };
 
   bool verify(Verification VerificationLevel = Verification::Basic) const;
@@ -169,9 +160,9 @@ public:
   void viewCFG() const { Entry->getParent()->viewCFG(); }
   void dumpLegacyDomTree() const;
 
- private:
+private:
   BlockTy Entry = nullptr;
-  DenseMap<BlockTy , std::unique_ptr<DTNode>> TreeNodes;
+  DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;
   mutable bool isInOutValid = false;
 
   DTNode *addNode(BlockTy BB);
@@ -221,7 +212,7 @@ public:
   };
 
   BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
-                        DenseMap<BlockTy, BlockTy> &Labels);
+                           DenseMap<BlockTy, BlockTy> &Labels);
 
   void insertUnreachable(DTNode *FromTN, BlockTy To);
   void insertReachable(DTNode *FromTN, DTNode *ToTN);
@@ -253,7 +244,8 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
   while (!WorkList.empty()) {
     BlockTy BB = WorkList.back();
     WorkList.pop_back();
-    if (Visited.count(BB) != 0) continue;
+    if (Visited.count(BB) != 0)
+      continue;
 
     auto &BBInfo = Res.NodeToInfo[BB];
     BBInfo.Num = Res.nextDFSNum;
@@ -275,6 +267,6 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
   return Res;
 }
 
-}  // end namespace llvm
+} // end namespace llvm
 
-#endif  // LLVM_IR_NEW_DOMINATORS_H
+#endif // LLVM_IR_NEW_DOMINATORS_H

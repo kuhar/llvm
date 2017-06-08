@@ -28,9 +28,9 @@ using namespace llvm;
 
 bool VerifyNewDomInfo = true;
 
-static cl::opt<bool, true> VerifyNewDomInfoX(
-    "verify-new-dom-info", cl::location(VerifyNewDomInfo),
-    cl::desc("Verify new dominator info (time consuming)"));
+static cl::opt<bool, true>
+    VerifyNewDomInfoX("verify-new-dom-info", cl::location(VerifyNewDomInfo),
+                      cl::desc("Verify new dominator info (time consuming)"));
 
 static cl::opt<bool> VerifySiblingProperty("verify-sibling-property",
                                            cl::init(false));
@@ -57,8 +57,7 @@ void DTNode::setIDom(DTNode *NewIDom) {
   NewIDom->addChild(this);
 }
 
-template <typename T>
-static StringRef NameOrNullptrStr(T *V) {
+template <typename T> static StringRef NameOrNullptrStr(T *V) {
   return V ? V->getName() : "nullptr";
 }
 
@@ -75,7 +74,7 @@ void DTNode::dump(raw_ostream &OS) const {
 }
 
 void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
-                         DTNode * const AttachTo /* = nullptr */) {
+                         DTNode *const AttachTo /* = nullptr */) {
   assert(DFS.NodeToInfo.count(Root) != 0 && "DFS not run?");
   assert(DFS.nextDFSNum > 0 && "DFS not run?");
 
@@ -122,12 +121,15 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
     DTNode *CurrentTreeNode = getNode(CurrentNode);
 
     for (auto PredNode : CurrentNodeInfo.Predecessors) {
-      if (PredNode == CurrentNode) continue;
+      if (PredNode == CurrentNode)
+        continue;
 
       // Incoming arc from an unreachable node.
-      if (DFS.NodeToInfo.count(PredNode) == 0) continue;
+      if (DFS.NodeToInfo.count(PredNode) == 0)
+        continue;
 
-      if (getNode(PredNode)->Level < MinLevel) continue;
+      if (getNode(PredNode)->Level < MinLevel)
+        continue;
 
       BlockTy SDomCandidate =
           getSDomCandidate(CurrentNode, PredNode, DFS, Label);
@@ -162,7 +164,8 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
   }
 
   DEBUG(dbgs() << "Entry " << Entry->getName() << "\n");
-  if (!AttachTo) return;
+  if (!AttachTo)
+    return;
 
   DEBUG(dbgs() << "Attaching Root " << Root->getName() << " to "
                << AttachTo->getName() << "\n");
@@ -176,16 +179,16 @@ void NewDomTree::semiNCA(DFSResult &DFS, BlockTy Root, const Index MinLevel,
 }
 
 // Non-recursive union-find-based semidominator path walker.
-NewDomTree::BlockTy NewDomTree::getSDomCandidate(const BlockTy Start,
-                                                 const BlockTy Pred,
-                                                 DFSResult &DFS,
-                                                 DenseMap<BlockTy,
-                                                 BlockTy> &Label) {
+NewDomTree::BlockTy
+NewDomTree::getSDomCandidate(const BlockTy Start, const BlockTy Pred,
+                             DFSResult &DFS,
+                             DenseMap<BlockTy, BlockTy> &Label) {
   assert(Pred != Start && "Not a predecessor");
   const Index StartNum = DFS.NodeToInfo[Start].Num;
   const Index PredNum = DFS.NodeToInfo[Pred].Num;
 
-  if (PredNum < StartNum) return Pred;
+  if (PredNum < StartNum)
+    return Pred;
 
   BlockTy Next = Pred;
   DFSNodeInfo *NextInfo = &DFS.NodeToInfo[Next];
@@ -222,7 +225,7 @@ DTNode *NewDomTree::addNode(BlockTy BB) {
 DTNode *NewDomTree::getOrAddNode(BlockTy BB) {
   auto it = TreeNodes.find(BB);
   if (it != TreeNodes.end())
-    return  it->second.get();
+    return it->second.get();
 
   return addNode(BB);
 }
@@ -235,9 +238,8 @@ void NewDomTree::computeReachableDominators(BlockTy Root, Index MinLevel) {
   auto DFSRes = runDFS(Entry, LevelDescender);
   for (auto &NodeToInfo : DFSRes.NodeToInfo) {
     DEBUG(dbgs() << "Processing reachable Node -> preorder Parent arc:\n");
-    DEBUG(dbgs() << "\t\t\t" << NameOrNullptrStr(NodeToInfo.first)
-                 << " -> " << NameOrNullptrStr(NodeToInfo.second.Parent)
-                 << "\n");
+    DEBUG(dbgs() << "\t\t\t" << NameOrNullptrStr(NodeToInfo.first) << " -> "
+                 << NameOrNullptrStr(NodeToInfo.second.Parent) << "\n");
     const auto Parent = NodeToInfo.second.Parent;
     if (Parent)
       getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
@@ -249,7 +251,7 @@ void NewDomTree::computeReachableDominators(BlockTy Root, Index MinLevel) {
 }
 
 void NewDomTree::computeUnreachableDominators(
-    BlockTy Root, DTNode * const Incoming,
+    BlockTy Root, DTNode *const Incoming,
     SmallVectorImpl<std::pair<BlockTy, DTNode *>> &DiscoveredConnectingArcs) {
   assert(!contains(Root));
   auto UnreachableDescender = [&DiscoveredConnectingArcs, this](BlockTy From,
@@ -279,14 +281,16 @@ void NewDomTree::computeUnreachableDominators(
 bool NewDomTree::contains(BlockTy BB) const { return TreeNodes.count(BB) != 0; }
 
 DTNode *NewDomTree::findNCA(DTNode *First, DTNode *Second) const {
-  DTNode * const EntryTreeNode = getNode(Entry);
-  if (First == EntryTreeNode || Second == EntryTreeNode) return EntryTreeNode;
+  DTNode *const EntryTreeNode = getNode(Entry);
+  if (First == EntryTreeNode || Second == EntryTreeNode)
+    return EntryTreeNode;
 
   while (First != Second) {
     const Index LFirst = First->Level;
     const Index LSecond = Second->Level;
 
-    if (LFirst < LSecond) std::swap(First, Second);
+    if (LFirst < LSecond)
+      std::swap(First, Second);
 
     First = First->IDom;
   }
@@ -301,7 +305,8 @@ bool NewDomTree::dominates(DTNode *Src, DTNode *Dst) const {
   if (Src->IDom == Dst)
     return false;
 
-  if (!isInOutValid) recomputeInOutNums();
+  if (!isInOutValid)
+    recomputeInOutNums();
 
   return Src->InNum <= Dst->InNum && Src->OutNum >= Dst->OutNum;
 }
@@ -310,7 +315,8 @@ void NewDomTree::insertArc(BlockTy From, BlockTy To) {
   // Source unreachable. We don't want to maintain a forest, so we ignore
   // unreachable nodes.
   auto FromTNIt = TreeNodes.find(From);
-  if (FromTNIt == TreeNodes.end()) return;
+  if (FromTNIt == TreeNodes.end())
+    return;
 
   isInOutValid = false;
 
@@ -318,7 +324,7 @@ void NewDomTree::insertArc(BlockTy From, BlockTy To) {
   // Connecting previously unreachable node.
   if (ToTNIt == TreeNodes.end())
     insertUnreachable(FromTNIt->second.get(), To);
-  else  // Both were reachable.
+  else // Both were reachable.
     insertReachable(FromTNIt->second.get(), ToTNIt->second.get());
 
   if (VerifyNewDomInfo && !verify(Verification::Basic))
@@ -341,15 +347,16 @@ void NewDomTree::insertUnreachable(DTNode *FromTN, BlockTy To) {
     insertReachable(getNode(A.first), A.second);
 }
 
-void NewDomTree::insertReachable(DTNode * const FromTN, DTNode * const ToTN) {
-  DTNode * const NCA = findNCA(FromTN, ToTN);
-  DTNode * const ToIDom = ToTN->IDom;
+void NewDomTree::insertReachable(DTNode *const FromTN, DTNode *const ToTN) {
+  DTNode *const NCA = findNCA(FromTN, ToTN);
+  DTNode *const ToIDom = ToTN->IDom;
 
   DEBUG(dbgs() << "Inserting a reachable arc: " << FromTN->getName() << " -> "
                << ToTN->getName() << "\n");
 
   // Nothing affected.
-  if (NCA == ToTN || NCA == ToIDom) return;
+  if (NCA == ToTN || NCA == ToIDom)
+    return;
 
   InsertionInfo II;
   DEBUG(dbgs() << "Marking " << ToTN->getName() << " affected\n");
@@ -359,7 +366,7 @@ void NewDomTree::insertReachable(DTNode * const FromTN, DTNode * const ToTN) {
   II.bucket.push({ToLevel, ToTN});
 
   while (!II.bucket.empty()) {
-    DTNode * const CurrentNode = II.bucket.top().second;
+    DTNode *const CurrentNode = II.bucket.top().second;
     II.bucket.pop();
     DEBUG(dbgs() << "\tAdding to visited and AQ: " << CurrentNode->getName()
                  << "\n");
@@ -377,8 +384,8 @@ void NewDomTree::insertReachable(DTNode * const FromTN, DTNode * const ToTN) {
   DEBUG(dump());
 }
 
-void NewDomTree::visitInsertion(DTNode * const TN, const Index RootLevel,
-                                DTNode * const NCA, InsertionInfo &II) {
+void NewDomTree::visitInsertion(DTNode *const TN, const Index RootLevel,
+                                DTNode *const NCA, InsertionInfo &II) {
   const Index NCALevel = NCA->Level;
   DEBUG(dbgs() << "Visiting " << TN->getName() << "\n");
 
@@ -390,7 +397,8 @@ void NewDomTree::visitInsertion(DTNode * const TN, const Index RootLevel,
     // Succ dominated by subtree Entry -- not affected.
     if (SuccLevel > RootLevel) {
       DEBUG(dbgs() << "\t\tdominated by subtree Entry\n");
-      if (II.visited.count(SuccTN) != 0) continue;
+      if (II.visited.count(SuccTN) != 0)
+        continue;
 
       DEBUG(dbgs() << "\t\tMarking visited not affected " << Succ->getName()
                    << "\n");
@@ -409,7 +417,7 @@ void NewDomTree::visitInsertion(DTNode * const TN, const Index RootLevel,
 void NewDomTree::updateInsertion(DTNode *NCA, InsertionInfo &II) {
   DEBUG(dbgs() << "Updating NCA = " << NCA->getName() << "\n");
   // Update idoms and start updating levels.
-  for (DTNode * TN : II.affectedQueue) {
+  for (DTNode *TN : II.affectedQueue) {
     DEBUG(dbgs() << "\tidoms[" << TN->getName() << "] = " << NCA->getName()
                  << "\n");
     TN->setIDom(NCA);
@@ -427,7 +435,7 @@ void NewDomTree::updateInsertion(DTNode *NCA, InsertionInfo &II) {
 void NewDomTree::updateLevels(InsertionInfo &II) {
   DEBUG(dbgs() << "Updating levels\n");
   // Update levels of visited but not affected nodes;
-  for (DTNode * TN : II.visitedNotAffectedQueue) {
+  for (DTNode *TN : II.visitedNotAffectedQueue) {
     DEBUG(dbgs() << "\tlevels[" << TN->getName() << "] = levels["
                  << TN->IDom->getName() << "] + 1\n");
     TN->Level = TN->IDom->Level + 1;
@@ -438,18 +446,20 @@ void NewDomTree::deleteArc(BlockTy From, BlockTy To) {
   DEBUG(dbgs() << "Deleting arc " << From->getName() << " -> " << To->getName()
                << "\n");
   // Deletion in unreachable subtree -- nothing to do.
-  if (!contains(From)) return;
+  if (!contains(From))
+    return;
 
-  DTNode * const FromTN = getNode(From);
-  DTNode * const ToTN = getNode(To);
+  DTNode *const FromTN = getNode(From);
+  DTNode *const ToTN = getNode(To);
   const auto NCA = findNCA(FromTN, ToTN);
 
   // To dominates From -- nothing to do.
-  if (ToTN == NCA) return;
+  if (ToTN == NCA)
+    return;
 
   isInOutValid = false;
 
-  DTNode * const IDomTo = ToTN->IDom;
+  DTNode *const IDomTo = ToTN->IDom;
   DEBUG(dbgs() << "NCA " << NCA->getName() << ", IDomTo " << IDomTo->getName()
                << "\n");
 
@@ -465,12 +475,13 @@ void NewDomTree::deleteArc(BlockTy From, BlockTy To) {
   }
 }
 
-bool NewDomTree::isReachableFromIDom(DTNode * const TN) {
+bool NewDomTree::isReachableFromIDom(DTNode *const TN) {
   for (auto *Succ : predecessors(TN->BB)) {
     // Incoming arc from an unreachable Node.
-    if (!contains(Succ)) continue;
+    if (!contains(Succ))
+      continue;
 
-    DTNode * const Support = findNCA(TN, getNode(Succ));
+    DTNode *const Support = findNCA(TN, getNode(Succ));
     if (Support != TN) {
       DEBUG(dbgs() << "\tIsReachable " << TN->getName()
                    << " from support = " << Succ->getName() << "\n");
@@ -481,15 +492,16 @@ bool NewDomTree::isReachableFromIDom(DTNode * const TN) {
   return false;
 }
 
-void NewDomTree::deleteReachable(DTNode * const FromTN, DTNode * const ToTN) {
+void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
   if (ToTN->PreorderParent && FromTN != ToTN->PreorderParent) {
     assert(ToTN->RDom);
-    if (ToTN->RDom != FromTN) return;
+    if (ToTN->RDom != FromTN)
+      return;
   }
 
   DEBUG(dbgs() << "Subtree needs to be rebuilt\n");
-  DTNode * const IDomTo = ToTN->IDom;
-  DTNode * const PrevIDomSubTree = IDomTo->IDom;
+  DTNode *const IDomTo = ToTN->IDom;
+  DTNode *const PrevIDomSubTree = IDomTo->IDom;
   const Index Level = IDomTo->Level;
   auto DescendBelow = [Level, this](BlockTy, BlockTy To) {
     return getNode(To)->Level > Level;
@@ -509,7 +521,7 @@ void NewDomTree::deleteReachable(DTNode * const FromTN, DTNode * const ToTN) {
   semiNCA(DFSRes, IDomTo->BB, Level, PrevIDomSubTree);
 }
 
-void NewDomTree::deleteUnreachable(DTNode * const ToTN) {
+void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
   DEBUG(dbgs() << "Deleting unreachable " << ToTN->getName() << "\n");
 
   SmallVector<BlockTy, 8> affectedQueue;
@@ -518,7 +530,8 @@ void NewDomTree::deleteUnreachable(DTNode * const ToTN) {
   const Index Level = ToTN->Level;
   auto DescendCollect = [Level, &affectedQueue, &affected, this](BlockTy,
                                                                  BlockTy To) {
-    if (getNode(To)->Level > Level) return true;
+    if (getNode(To)->Level > Level)
+      return true;
     if (affected.count(To) == 0) {
       affected.insert(To);
       affectedQueue.push_back(To);
@@ -528,33 +541,34 @@ void NewDomTree::deleteUnreachable(DTNode * const ToTN) {
 
   auto DFSRes = runDFS(ToTN->BB, DescendCollect);
   DEBUG(DFSRes.dumpDFSNumbering());
-  DTNode * MinNode = ToTN;
+  DTNode *MinNode = ToTN;
 
   for (const BlockTy N : affectedQueue) {
-    DTNode * const TN = getNode(N);
+    DTNode *const TN = getNode(N);
     DTNode *NCA = findNCA(TN, ToTN);
-    if (NCA != TN && NCA->Level < MinNode->Level) MinNode = NCA;
+    if (NCA != TN && NCA->Level < MinNode->Level)
+      MinNode = NCA;
   }
 
   for (Index i = DFSRes.nextDFSNum - 1; i < DFSRes.nextDFSNum; --i) {
     const BlockTy N = DFSRes.numToNode[i];
-    DTNode * const TN = getNode(N);
-    DEBUG(dbgs() << "Erasing node info "  << N->getName()
-                 << " (level " << TN->Level << ", idom "
-                 << TN->IDom->getName() << ")\n");
+    DTNode *const TN = getNode(N);
+    DEBUG(dbgs() << "Erasing node info " << N->getName() << " (level "
+                 << TN->Level << ", idom " << TN->IDom->getName() << ")\n");
 
     TN->IDom->removeChild(TN);
     TreeNodes.erase(TN->BB); // TODO: Should we keep it around for the TN not to
                              // reappear under a different address?
   }
 
-  if (MinNode == ToTN) return;
+  if (MinNode == ToTN)
+    return;
 
   DEBUG(dbgs() << "DeleteUnreachable: running SNCA(MinNode = "
                << MinNode->getName() << ")\n");
   const Index MinLevel = MinNode->Level;
-  DTNode * const PrevIDomMin = MinNode->IDom;
-  DFSRes = runDFS(MinNode->BB, [MinLevel, this](BlockTy , BlockTy To) {
+  DTNode *const PrevIDomMin = MinNode->IDom;
+  DFSRes = runDFS(MinNode->BB, [MinLevel, this](BlockTy, BlockTy To) {
     return contains(To) && getNode(To)->Level > MinLevel;
   });
 
@@ -570,7 +584,7 @@ void NewDomTree::recomputeInOutNums() const {
 
   Index NextNum = 0;
   while (!WorkList.empty()) {
-    DTNode * Current = WorkList.back();
+    DTNode *Current = WorkList.back();
 
     if (Visited.count(Current) != 0) {
       WorkList.pop_back();
@@ -580,7 +594,8 @@ void NewDomTree::recomputeInOutNums() const {
 
     Visited.insert(Current);
     Current->InNum = NextNum++;
-    for (DTNode *C : *Current) WorkList.push_back(C);
+    for (DTNode *C : *Current)
+      WorkList.push_back(C);
   }
 
   isInOutValid = true;
@@ -663,7 +678,8 @@ bool NewDomTree::verifyWithOldDT() const {
   bool Correct = true;
 
   for (const auto &BlockToNode : TreeNodes) {
-    if (BlockToNode.first == Entry) continue;
+    if (BlockToNode.first == Entry)
+      continue;
 
     auto Node = BlockToNode.first;
     auto IDom = BlockToNode.second->IDom->BB;
@@ -685,15 +701,17 @@ bool NewDomTree::verifyNCA() const {
   Function *F = Entry->getParent();
   bool Correct = true;
   for (auto &BB : *F) {
-    if (!contains(&BB)) continue;
+    if (!contains(&BB))
+      continue;
 
     // For every arc U -> V in the graph, NCA(U, V) = idoms[V] or V.
     for (auto *Succ : successors(&BB)) {
-      if (!contains(Succ)) continue;
+      if (!contains(Succ))
+        continue;
       // dbgs() << "Checking NCA(" << BB.getName() << ", " << Succ->getName() <<
       //          ")\n";
 
-      DTNode * const SuccTN = getNode(Succ);
+      DTNode *const SuccTN = getNode(Succ);
       auto NCA = findNCA(getNode(&BB), SuccTN);
       if (NCA != SuccTN && NCA != SuccTN->IDom) {
         Correct = false;
@@ -710,7 +728,8 @@ bool NewDomTree::verifyLevels() const {
   Function *F = Entry->getParent();
   bool Correct = true;
   for (auto &BB : *F) {
-    if (!contains(&BB) || &BB == Entry) continue;
+    if (!contains(&BB) || &BB == Entry)
+      continue;
 
     const auto TN = getNode(&BB);
     const Index BBL = TN->Level;
@@ -729,7 +748,7 @@ bool NewDomTree::verifyLevels() const {
 bool NewDomTree::verifyReachability() const {
   bool Correct = true;
 
-  auto DFSRes = runDFS(Entry, [] (BlockTy, BlockTy) { return true; });
+  auto DFSRes = runDFS(Entry, [](BlockTy, BlockTy) { return true; });
   for (auto NodeToInfo : DFSRes.NodeToInfo)
     if (!contains(NodeToInfo.first)) {
       errs() << "=================== Incorrect domtree! ===============\n";
@@ -755,13 +774,13 @@ bool NewDomTree::verifyParentProperty() const {
     if (IDom == Entry)
       continue;
 
-    auto SkipIDom = [&] (BlockTy , BlockTy Succ) { return Succ != IDom; };
+    auto SkipIDom = [&](BlockTy, BlockTy Succ) { return Succ != IDom; };
     auto DFSRes = runDFS(Entry, SkipIDom);
     if (DFSRes.NodeToInfo.count(Target)) {
       errs() << "=================== Incorrect domtree! ===============\n";
-      errs() << "DFS walk found a path from " << Entry->getName()
-             << " to " << Target->getName() << " skipping its idom "
-             << IDom->getName() << "\n";
+      errs() << "DFS walk found a path from " << Entry->getName() << " to "
+             << Target->getName() << " skipping its idom " << IDom->getName()
+             << "\n";
       Target->getParent()->print(errs(), nullptr);
 
       print(errs());
@@ -779,7 +798,7 @@ bool NewDomTree::verifySiblingProperty() const {
   bool Correct = true;
 
   for (auto &BlockToNode : TreeNodes) {
-    const auto& Siblings = BlockToNode.second->Children;
+    const auto &Siblings = BlockToNode.second->Children;
     for (const auto &N : Siblings) {
       for (const auto &S : Siblings) {
         if (S == N)
@@ -806,20 +825,21 @@ bool NewDomTree::verifySiblingProperty() const {
 void NewDomTree::print(raw_ostream &OS) const {
   assert(!TreeNodes.empty());
   OS << "\nNew Dominator Tree:\n";
-  if (!isInOutValid) recomputeInOutNums();
+  if (!isInOutValid)
+    recomputeInOutNums();
 
   printImpl(OS, getNode(Entry));
 }
 
 void NewDomTree::printImpl(raw_ostream &OS, const DTNode *TN) const {
-  for (Index i = 0; i <= TN->Level; ++i) OS << "  ";
-  OS << '[' << (TN->Level + 1) << "] %" << TN->getName() << " {"
-     << TN->InNum << ", " << TN->OutNum << "}\n";
+  for (Index i = 0; i <= TN->Level; ++i)
+    OS << "  ";
+  OS << '[' << (TN->Level + 1) << "] %" << TN->getName() << " {" << TN->InNum
+     << ", " << TN->OutNum << "}\n";
 
   SmallVector<DTNode *, 8> Ch(TN->begin(), TN->end());
-  std::sort(Ch.begin(), Ch.end(), [] (DTNode *F, DTNode *S) {
-    return F->getInNum() < S->getInNum();
-  });
+  std::sort(Ch.begin(), Ch.end(),
+            [](DTNode *F, DTNode *S) { return F->getInNum() < S->getInNum(); });
 
   for (auto C : Ch)
     printImpl(OS, C);
@@ -865,7 +885,8 @@ void NewDomTree::addDebugInfoToIR() {
     Buffer.clear();
 
     auto RD = BlockToNode.second->RDom;
-    if (!RD) continue;
+    if (!RD)
+      continue;
 
     RSO << "rdom___" << RD->getName() << "___";
     RSO.flush();

@@ -80,7 +80,8 @@ static std::error_code outputGraph(InputGraph &IG) {
 
   std::error_code EC;
   raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
-  if (EC) return EC;
+  if (EC)
+    return EC;
 
   IG.printCurrent(Out);
   return {};
@@ -93,7 +94,8 @@ static std::error_code outputIR(InputGraph &IG) {
   }
   std::error_code EC;
   raw_fd_ostream Out(OutputFile, EC, sys::fs::OpenFlags::F_None);
-  if (EC) return EC;
+  if (EC)
+    return EC;
 
   if (isIRFile(OutputFile)) {
     IG.cfg->module.print(Out, nullptr);
@@ -110,7 +112,8 @@ static Optional<InputGraph> readGraph() {
     return None;
   }
 
-  if (isGraphFile(InputFile)) return InputGraph::readFromFile(InputFile);
+  if (isGraphFile(InputFile))
+    return InputGraph::readFromFile(InputFile);
 
   if (isBitcodeFile(InputFile)) {
     auto *Context = new LLVMContext();
@@ -127,7 +130,8 @@ static Optional<InputGraph> readGraph() {
       return None;
     }
 
-    if (ViewCFG) M->getFunctionList().front().viewCFG();
+    if (ViewCFG)
+      M->getFunctionList().front().viewCFG();
 
     return InputGraph::fromModule(*M);
   }
@@ -169,7 +173,8 @@ int main(int argc, char **argv) {
   PrettyStackTraceProgram X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "dominators");
 
-  if (!validateConsoleFlags()) return 1;
+  if (!validateConsoleFlags())
+    return 1;
 
   auto Graph = readGraph();
   if (!Graph) {
@@ -192,7 +197,8 @@ int main(int argc, char **argv) {
   }
 
   auto *RootBB = Graph->toCFG();
-  if (ViewCFG) RootBB->getParent()->viewCFG();
+  if (ViewCFG)
+    RootBB->getParent()->viewCFG();
 
   if (ToIR) {
     auto EC = outputIR(*Graph);

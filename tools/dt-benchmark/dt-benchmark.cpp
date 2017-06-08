@@ -47,7 +47,8 @@ static std::unique_ptr<Module> GetModule(StringRef Filename) {
   auto *Context = new LLVMContext();
   SMDiagnostic Diags;
   auto M = parseIRFile(InputFile, Diags, *Context);
-  if (!M) Diags.print(InputFile.c_str(), errs());
+  if (!M)
+    Diags.print(InputFile.c_str(), errs());
 
   return M;
 }
@@ -105,12 +106,13 @@ static void RunNew(Module &M) {
     DEBUG(dbgs() << F.getName() << "\n");
 
     TotalElapsed += Time("New DT",
-         [&] {
-           NewDomTree NDT(&F.getEntryBlock());
-           TouchNOP(&NDT);
-           if (VerifyDomInfo) NDT.verify(NewDomTree::Verification::Normal);
-         },
-         ++current, NumFun);
+                         [&] {
+                           NewDomTree NDT(&F.getEntryBlock());
+                           TouchNOP(&NDT);
+                           if (VerifyDomInfo)
+                             NDT.verify(NewDomTree::Verification::Normal);
+                         },
+                         ++current, NumFun);
   }
 
   outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n New DT: Total time\t"
@@ -123,7 +125,8 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, "dominators");
 
   auto M = GetModule(InputFile);
-  if (!M) return 1;
+  if (!M)
+    return 1;
 
   outs() << "Bitcode read; module has " << M->getFunctionList().size()
          << " functions\n";
@@ -133,10 +136,12 @@ int main(int argc, char **argv) {
     outs() << "=== Verification on ===\n";
 
   if (OldDT)
-    for (unsigned i = 0; i < Iterations; ++i) RunOld(*M);
+    for (unsigned i = 0; i < Iterations; ++i)
+      RunOld(*M);
 
   if (NewDT)
-    for (unsigned i = 0; i < Iterations; ++i) RunNew(*M);
+    for (unsigned i = 0; i < Iterations; ++i)
+      RunNew(*M);
 
   return 0;
 }
