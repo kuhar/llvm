@@ -17,6 +17,7 @@
 
 #include <queue>
 #include <utility>
+#include <memory>
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/GraphTraits.h"
@@ -35,31 +36,110 @@ class Instruction;
 class Module;
 class raw_ostream;
 
-using Node = BasicBlock *;
-using Index = unsigned;
-
 struct NodeByName {
-  bool operator()(const Node first, const Node second) const {
-    const auto Cmp = first->getName().compare_numeric(second->getName());
-    if (Cmp == 0) return less{}(first, second);
+  bool operator()(const BasicBlock *First, const BasicBlock *Second) const {
+    const auto Cmp = First->getName().compare_numeric(Second->getName());
+    if (Cmp == 0) return less{}(First, Second);
 
     return Cmp < 0;
   }
 };
 
+class DTNode {
+public:
+  using BlockTy = BasicBlock *;
+  using Index = unsigned;
+
+  BlockTy getBlock() const { return BB; }
+  DTNode *getIDom() const { return IDom; }
+  Index getLevel() const { return Level; }
+  Index getInNum() const { return InNum; }
+  Index getOutNum() const { return OutNum; }
+
+  using ChildrenTy = SmallVector<DTNode *, 4>;
+  using iterator = typename ChildrenTy::iterator;
+  using const_iterator = typename ChildrenTy::const_iterator;
+
+  iterator begin() { return Children.begin(); }
+  iterator end() { return Children.end(); }
+  const_iterator begin() const { return Children.begin(); }
+  const_iterator end() const { return Children.end(); }
+  size_t getNumChildren() const { return Children.size(); }
+
+  iterator findChild(DTNode *Child) {
+    return std::find(begin(), end(), Child);
+  }
+
+  const_iterator findChild(DTNode *Child) const {
+    return std::find(begin(), end(), Child);
+  }
+
+  iterator findChild(BlockTy ChildBB) {
+    return std::find_if(begin(), end(), [ChildBB] (DTNode* C) {
+      return C->BB == ChildBB;
+    });
+  }
+
+  const_iterator findChild(BlockTy ChildBB) const {
+    return std::find_if(begin(), end(), [ChildBB] (DTNode* C) {
+      return C->BB == ChildBB;
+    });
+  }
+
+  bool hasChild(DTNode *Child) const {
+    return findChild(Child) != end();
+  }
+
+  bool hasChild(BlockTy ChildBB) const {
+    return findChild(ChildBB) != end();
+  }
+
+  StringRef getName() const { return BB->getName(); }
+  void dump(raw_ostream &OS = dbgs()) const;
+
+private:
+  friend class NewDomTree;
+  DTNode(BlockTy Block) : BB(Block) {}
+
+  void setIDom(DTNode *NewIDom);
+
+  BasicBlock *BB;
+  DTNode *IDom = nullptr;
+  Index Level = 0;
+  ChildrenTy Children;
+  DTNode *RDom = nullptr;
+  DTNode *PreorderParent = nullptr;
+  mutable Index InNum = 0;
+  mutable Index OutNum = 0;
+
+  void addChild(DTNode *Child);
+  void removeChild(DTNode *Child);
+};
+
+
 class NewDomTree {
 public:
-  NewDomTree(Node Root) : root(Root) { computeReachableDominators(root, 0); }
+  using BlockTy = DTNode::BlockTy;
+  using Index = DTNode::Index;
 
-  bool contains(Node N) const;
-  Node getIDom(Node N) const;
-  Index getLevel(Node N) const;
-  Node findNCA(Node First, Node Second) const;
+  NewDomTree(BlockTy Entry) : Entry(Entry) {
+    computeReachableDominators(Entry, 0);
+  }
 
-  bool dominates(Node Src, Node Dst) const;
+  bool contains(BlockTy N) const;
 
-  void insertArc(Node From, Node To);
-  void deleteArc(Node From, Node To);
+  DTNode *getNode(BlockTy BB) const  {
+    const auto it = TreeNodes.find(BB);
+    assert(it != TreeNodes.end());
+    return it->second.get();
+  }
+
+  DTNode *findNCA(DTNode *First, DTNode *Second) const;
+
+  bool dominates(DTNode *Src, DTNode *Dst) const;
+
+  void insertArc(BlockTy From, BlockTy To);
+  void deleteArc(BlockTy From, BlockTy To);
 
   void toOldDT(DominatorTree& DT) const;
 
@@ -85,48 +165,45 @@ public:
   void print(raw_ostream &OS) const;
   void dump() const { print(dbgs()); }
   void dumpIDoms(raw_ostream &OS = dbgs()) const;
-  void dumpLevels(raw_ostream &OS = dbgs()) const;
   void addDebugInfoToIR();
-  void viewCFG() const { root->getParent()->viewCFG(); }
+  void viewCFG() const { Entry->getParent()->viewCFG(); }
   void dumpLegacyDomTree() const;
 
  private:
-  Node root = nullptr;
-  DenseMap<Node, Node> idoms;
-  DenseMap<Node, Node> rdoms;
-  DenseMap<Node, Index> levels;
-  DenseMap<Node, Node> preorderParents;
-  DenseMap<Node, SmallVector<Node, 6>> children;
-  mutable DenseMap<Node, std::pair<Index, Index>> inOutNums;
+  BlockTy Entry = nullptr;
+  DenseMap<BlockTy , std::unique_ptr<DTNode>> TreeNodes;
   mutable bool isInOutValid = false;
 
-  void computeReachableDominators(Node Root, Index MinLevel);
+  DTNode *addNode(BlockTy BB);
+  DTNode *getOrAddNode(BlockTy BB);
+
+  void computeReachableDominators(BlockTy Root, Index MinLevel);
   void computeUnreachableDominators(
-      Node Root, Node Incoming,
-      SmallVectorImpl<std::pair<Node, Node>> &DiscoveredConnectingArcs);
+      BlockTy Root, BlockTy Incoming,
+      SmallVectorImpl<std::pair<BlockTy, BlockTy>> &DiscoveredConnectingArcs);
 
   struct DFSNodeInfo {
-    SmallVector<Node, 8> Predecessors;
+    SmallVector<BlockTy, 8> Predecessors;
     Index Num;
-    Node Parent;
+    BlockTy Parent;
   };
 
   struct DFSResult {
     Index nextDFSNum = 0;
-    std::vector<Node> numToNode;
-    DenseMap<Node, DFSNodeInfo> NodeToInfo;
+    std::vector<BlockTy> numToNode;
+    DenseMap<BlockTy, DFSNodeInfo> NodeToInfo;
 
     void dumpDFSNumbering(raw_ostream &OS = dbgs()) const;
   };
 
   template <typename DescendCondition>
-  static DFSResult runDFS(Node Start, DescendCondition Condition);
+  static DFSResult runDFS(BlockTy Start, DescendCondition Condition);
 
-  void semiNCA(DFSResult &DFS, Node Root, Index MinLevel,
-               Node AttachTo = nullptr);
+  void semiNCA(DFSResult &DFS, BlockTy Root, Index MinLevel,
+               DTNode *AttachTo = nullptr);
 
   struct InsertionInfo {
-    using BucketElementTy = std::pair<Index, Node>;
+    using BucketElementTy = std::pair<Index, BlockTy>;
     struct DecreasingLevel {
       bool operator()(const BucketElementTy &First,
                       const BucketElementTy &Second) const {
@@ -137,50 +214,46 @@ public:
     std::priority_queue<BucketElementTy, SmallVector<BucketElementTy, 8>,
                         DecreasingLevel>
         bucket;
-    DenseSet<Node> affected;
-    DenseSet<Node> visited;
-    SmallVector<Node, 8> affectedQueue;
-    SmallVector<Node, 8> visitedNotAffectedQueue;
+    DenseSet<BlockTy> affected;
+    DenseSet<BlockTy> visited;
+    SmallVector<BlockTy, 8> affectedQueue;
+    SmallVector<BlockTy, 8> visitedNotAffectedQueue;
   };
 
-  bool hasChild(Node N, Node Child) const;
-  void addChild(Node N, Node Child);
-  void removeChild(Node N, Node Child);
-  void setIDom(Node N, Node NewIDom);
-  Node getSDomCandidate(Node Start, Node Pred, DFSResult &DFS,
-                        DenseMap<Node, Node> &Labels);
+  BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
+                        DenseMap<BlockTy, BlockTy> &Labels);
 
-  void insertUnreachable(Node From, Node To);
-  void insertReachable(Node From, Node To);
-  void visitInsertion(Node N, Index RootLevel, Node NCA, InsertionInfo &II);
-  void updateInsertion(Node NCA, InsertionInfo &II);
+  void insertUnreachable(BlockTy From, BlockTy To);
+  void insertReachable(BlockTy From, BlockTy To);
+  void visitInsertion(DTNode *N, Index RootLevel, DTNode *NCA,
+                      InsertionInfo &II);
+  void updateInsertion(DTNode *NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
 
-  bool isReachableFromIDom(Node N);
-  void deleteReachable(Node From, Node To);
-  void deleteUnreachable(Node To);
+  bool isReachableFromIDom(DTNode *N);
+  void deleteReachable(BlockTy From, BlockTy To);
+  void deleteUnreachable(BlockTy To);
 
   void recomputeInOutNums() const;
 
-  using ChildrenTy = DenseMap<Node, SmallVector<Node, 8>>;
-  void printImpl(raw_ostream &OS, Node N, const ChildrenTy &Children,
-                 std::set<Node, NodeByName> &ToPrint) const;
+  using ChildrenTy = DenseMap<BlockTy, SmallVector<BlockTy, 8>>;
+  void printImpl(raw_ostream &OS, const DTNode *TN) const;
 };
 
 template <typename DescendCondition>
-NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
+NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
                                          DescendCondition Condition) {
   DFSResult Res;
   Res.nextDFSNum = 0;
-  DenseSet<Node> Visited;
-  SmallVector<Node, 16> WorkList;
+  DenseSet<BlockTy> Visited;
+  SmallVector<BlockTy, 16> WorkList;
 
   Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);
 
   // Compute preorder numbers nad parents.
   while (!WorkList.empty()) {
-    BasicBlock *BB = WorkList.back();
+    BlockTy BB = WorkList.back();
     WorkList.pop_back();
     if (Visited.count(BB) != 0) continue;
 
@@ -189,7 +262,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(Node Start,
     Res.numToNode.push_back(BB);
     ++Res.nextDFSNum;
     Visited.insert(BB);
-    for (auto *Succ : reverse(successors(BB))) {
+    for (auto *Succ : successors(BB)) {
       auto &SuccInfo = Res.NodeToInfo[Succ];
       if (Succ != BB)
         SuccInfo.Predecessors.push_back(BB);

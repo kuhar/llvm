@@ -23,6 +23,7 @@ class Module;
 class raw_ostream;
 
 struct GraphCFG {
+  using Index = DTNode::Index;
   LLVMContext context;
   Module module;
   Function *function;
@@ -40,6 +41,7 @@ struct GraphCFG {
 };
 
 struct InputGraph {
+  using Index = DTNode::Index;
   unsigned nodesNum = 0;
   unsigned entry = 0;
   unsigned updateIdx = 0;
