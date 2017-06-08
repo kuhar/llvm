@@ -191,6 +191,13 @@ private:
 
   void semiNCA(DFSResult &DFS, Index MinLevel, DTNode *AttachTo = nullptr);
 
+  struct SNCAInfo {
+    BlockTy Label;
+    BlockTy SDom;
+  };
+  BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
+                           DenseMap<BlockTy, SNCAInfo> &SNCA);
+
   struct InsertionInfo {
     using BucketElementTy = std::pair<Index, DTNode *>;
     struct DecreasingLevel {
@@ -208,9 +215,6 @@ private:
     SmallVector<DTNode *, 8> affectedQueue;
     SmallVector<DTNode *, 8> visitedNotAffectedQueue;
   };
-
-  BlockTy getSDomCandidate(BlockTy Start, BlockTy Pred, DFSResult &DFS,
-                           DenseMap<BlockTy, BlockTy> &Labels);
 
   void insertUnreachable(DTNode *FromTN, BlockTy To);
   void insertReachable(DTNode *FromTN, DTNode *ToTN);

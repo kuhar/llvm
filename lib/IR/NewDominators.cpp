@@ -78,10 +78,8 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   const Index NextDFSNum = static_cast<Index>(DFS.NumToNode.size());
   assert(NextDFSNum > 0 && "DFS not run?");
 
-  DenseMap<BlockTy, BlockTy> Label;
-  Label.reserve(NextDFSNum);
-  DenseMap<BlockTy, BlockTy> SDoms;
-  SDoms.reserve(NextDFSNum);
+  DenseMap<BlockTy, SNCAInfo> SNCA;
+  SNCA.reserve(NextDFSNum);
   const Index LastNum = NextDFSNum - 1;
   DEBUG(dbgs() << "StartNum: " << 0 << ": "
                << DFS.NumToNode.back()->getName() << "\n");
@@ -100,8 +98,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
       RootTreeNode = TreeN;
 
     TreeN->Children.clear();
-    SDoms[N] = N;
-    Label[N] = N;
+    SNCA[N] = {N, N};
   }
 
   assert(RootTreeNode);
@@ -122,6 +119,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   for (Index i = LastNum; i > 0; --i) {
     BlockTy CurrentNode = DFS.NumToNode[i];
     auto &CurrentNodeInfo = DFS.NodeToInfo[CurrentNode];
+    auto &CurrentSNCAInfo = SNCA[CurrentNode];
     DTNode *CurrentTreeNode = getNode(CurrentNode);
 
     for (auto PredNode : CurrentNodeInfo.Predecessors) {
@@ -136,15 +134,17 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
         continue;
 
       BlockTy SDomCandidate =
-          getSDomCandidate(CurrentNode, PredNode, DFS, Label);
-      if (DFS.NodeToInfo[SDoms[CurrentNode]].Num >
-          DFS.NodeToInfo[SDoms[SDomCandidate]].Num) {
-        SDoms[CurrentNode] = SDoms[SDomCandidate];
+          getSDomCandidate(CurrentNode, PredNode, DFS, SNCA);
+
+      auto &CandidateInfo = SNCA[SDomCandidate];
+      if (DFS.NodeToInfo[CurrentSNCAInfo.SDom].Num >
+          DFS.NodeToInfo[CandidateInfo.SDom].Num) {
+        CurrentSNCAInfo.SDom = CandidateInfo.SDom;
         CurrentTreeNode->RDom = getNode(SDomCandidate);
       }
     }
     // Update Label for the current Node.
-    Label[CurrentNode] = SDoms[CurrentNode];
+    CurrentSNCAInfo.Label = CurrentSNCAInfo.SDom;
   }
 
   // Step 3: compute immediate dominators as
@@ -154,7 +154,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   for (Index i = 1; i <= LastNum; ++i) {
     const BlockTy CurrentNode = DFS.NumToNode[i];
     DTNode *CurrentTreeNode = getNode(CurrentNode);
-    const BlockTy SDom = SDoms[CurrentNode];
+    const BlockTy SDom = SNCA[CurrentNode].SDom;
     DTNode *IDomCandidate = CurrentTreeNode->IDom;
     while (DFS.NodeToInfo[IDomCandidate->BB].Num > DFS.NodeToInfo[SDom].Num)
       IDomCandidate = IDomCandidate->IDom;
@@ -186,7 +186,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
 NewDomTree::BlockTy
 NewDomTree::getSDomCandidate(const BlockTy Start, const BlockTy Pred,
                              DFSResult &DFS,
-                             DenseMap<BlockTy, BlockTy> &Label) {
+                             DenseMap<BlockTy, SNCAInfo> &SNCA) {
   assert(Pred != Start && "Not a predecessor");
   const Index StartNum = DFS.NodeToInfo[Start].Num;
   const Index PredNum = DFS.NodeToInfo[Pred].Num;
@@ -209,13 +209,14 @@ NewDomTree::getSDomCandidate(const BlockTy Start, const BlockTy Pred,
     const auto Current = SDomPath[i];
     const auto Parent = SDomPath[i + 1];
 
-    if (DFS.NodeToInfo[Label[Current]].Num > DFS.NodeToInfo[Label[Parent]].Num)
-      Label[Current] = Label[Parent];
+    if (DFS.NodeToInfo[SNCA[Current].Label].Num >
+        DFS.NodeToInfo[SNCA[Parent].Label].Num)
+      SNCA[Current].Label = SNCA[Parent].Label;
 
     DFS.NodeToInfo[Current].Parent = DFS.NodeToInfo[Parent].Parent;
   }
 
-  return Label[Pred];
+  return SNCA[Pred].Label;
 }
 
 DTNode *NewDomTree::addNode(BlockTy BB) {
