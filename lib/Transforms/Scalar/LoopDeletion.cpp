@@ -300,8 +300,8 @@ static void deleteDeadLoop(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   LI.markAsRemoved(L);
 
   NDT.verify(NewDomTree::Verification::Normal);
-  outs() << "!!!!!!!!!!!!!!!!!! Wooooooooosh !!!!!!!!!!!!!!!!!!\n";
-  outs().flush();
+  //outs() << "!!!!!!!!!!!!!!!!!! Wooooooooosh !!!!!!!!!!!!!!!!!!\n";
+  //outs().flush();
   NDT.toOldDT(DT);
 }
 

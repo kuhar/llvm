@@ -116,6 +116,7 @@ public:
 
   NewDomTree(BlockTy Entry) : Entry(Entry) {
     computeReachableDominators(Entry, 0);
+    // recomputeInOutNums();
   }
 
   bool contains(BlockTy N) const;
@@ -132,6 +133,9 @@ public:
 
   void insertArc(BlockTy From, BlockTy To);
   void deleteArc(BlockTy From, BlockTy To);
+
+  void eraseNode(DTNode *TN);
+  void replaceWith(DTNode *Replace, DTNode *With);
 
   void toOldDT(DominatorTree &DT) const;
 
@@ -222,6 +226,7 @@ private:
                       InsertionInfo &II);
   void updateInsertion(DTNode *NCA, InsertionInfo &II);
   void updateLevels(InsertionInfo &II);
+  void updateLevels(DTNode *Start);
 
   bool isReachableFromIDom(DTNode *N);
   void deleteReachable(DTNode *FromTN, DTNode *ToTN);
@@ -236,8 +241,8 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
                                          DescendCondition Condition) {
   DFSResult Res;
   Index NextDFSNum = 0;
-  DenseSet<BlockTy> Visited;
-  SmallVector<BlockTy, 16> WorkList;
+  SmallDenseSet<BlockTy, 64> Visited;
+  SmallVector<BlockTy, 64> WorkList;
 
   Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);

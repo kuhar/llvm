@@ -355,9 +355,9 @@ bool DominatorTreeWrapperPass::runOnFunction(Function &F) {
   TotalElapsed += EndTime - StartTime;
   static unsigned n = 0;
   ++n;
-  outs() << "DT.recalculate " << n << ", "
-         << std::chrono::duration_cast<std::chrono::seconds>(TotalElapsed)
-             .count() << "s\n";
+//  outs() << "DT.recalculate " << n << ", "
+//         << std::chrono::duration_cast<std::chrono::seconds>(TotalElapsed)
+//             .count() << "s\n";
   return false;
 }
 

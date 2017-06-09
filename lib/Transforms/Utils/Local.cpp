@@ -41,6 +41,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/NewDominators.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/ValueHandle.h"
@@ -607,25 +608,32 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, DominatorTree *DT) {
     BA->destroyConstant();
   }
 
+  NewDomTree NDT(&PredBB->getParent()->getEntryBlock());
+
   // Anything that branched to PredBB now branches to DestBB.
   PredBB->replaceAllUsesWith(DestBB);
+  PredBB->getTerminator()->eraseFromParent();
 
   // Splice all the instructions from PredBB to DestBB.
-  PredBB->getTerminator()->eraseFromParent();
   DestBB->getInstList().splice(DestBB->begin(), PredBB->getInstList());
 
   // If the PredBB is the entry block of the function, move DestBB up to
   // become the entry block after we erase PredBB.
-  if (PredBB == &DestBB->getParent()->getEntryBlock())
+  if (PredBB == &DestBB->getParent()->getEntryBlock()) {
     DestBB->moveAfter(PredBB);
 
-  if (DT) {
-    BasicBlock *PredBBIDom = DT->getNode(PredBB)->getIDom()->getBlock();
-    DT->changeImmediateDominator(DestBB, PredBBIDom);
-    DT->eraseNode(PredBB);
+    if (DT) {
+      BasicBlock *PredBBIDom = DT->getNode(PredBB)->getIDom()->getBlock();
+      DT->changeImmediateDominator(DestBB, PredBBIDom);
+      DT->eraseNode(PredBB);
+    }
   }
+
   // Nuke BB.
   PredBB->eraseFromParent();
+
+  //NDT.replaceWith(NDT.getNode(PredBB), NDT.getNode(DestBB));
+  //NDT.verify(NewDomTree::Verification::Normal);
 }
 
 /// CanMergeValues - Return true if we can choose one of these values to use

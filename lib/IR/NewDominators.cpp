@@ -562,9 +562,8 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
     DEBUG(dbgs() << "Erasing node info " << N->getName() << " (level "
                  << TN->Level << ", idom " << TN->IDom->getName() << ")\n");
 
-    TN->IDom->removeChild(TN);
-    TreeNodes.erase(TN->BB); // TODO: Should we keep it around for the TN not to
-                             // reappear under a different address?
+    eraseNode(TN); // TODO: Should we keep it around for the TN not to
+                   // reappear under a different address?
   }
 
   if (MinNode == ToTN)
@@ -584,24 +583,63 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
   semiNCA(DFSRes, MinLevel, PrevIDomMin);
 }
 
+void NewDomTree::eraseNode(DTNode *TN) {
+  assert(TN->getNumChildren() == 0);
+  TN->IDom->removeChild(TN);
+  TreeNodes.erase(TN->BB);
+}
+
+void NewDomTree::replaceWith(DTNode *Replace, DTNode *With) {
+  for (auto &BlockToTN : TreeNodes) {
+    auto *TN = BlockToTN.second.get();
+    if (TN->IDom == Replace)
+      TN->IDom = With;
+    if (TN->RDom == Replace)
+      TN->RDom = With;
+    if (TN->PreorderParent == Replace)
+      TN->PreorderParent = With;
+  }
+
+  if (getNode(Entry) == Replace)
+    Entry = With->BB;
+
+  eraseNode(Replace);
+  for (auto *C : *With)
+    updateLevels(C);
+  isInOutValid = false;
+}
+
+void NewDomTree::updateLevels(DTNode *Start) {
+  SmallVector<DTNode *, 64> WorkList = {Start};
+
+  while (!WorkList.empty()) {
+    DTNode *CurrentTN = WorkList.pop_back_val();
+
+    CurrentTN->Level = CurrentTN->IDom->Level + 1;
+    for (DTNode *C : *CurrentTN)
+      WorkList.push_back(C);
+  }
+}
+
 void NewDomTree::recomputeInOutNums() const {
-  std::vector<DTNode *> WorkList = {getNode(Entry)};
-  DenseSet<DTNode *> Visited;
+  using PairT = PointerIntPair<DTNode *, 1, bool>;
+  SmallVector<PairT, 64> WorkList = {{getNode(Entry), false}};
 
   Index NextNum = 0;
   while (!WorkList.empty()) {
-    DTNode *Current = WorkList.back();
+    PairT &Current = WorkList.back();
+    DTNode *CurrentTN = Current.getPointer();
 
-    if (Visited.count(Current) != 0) {
+    if (Current.getInt()) {
       WorkList.pop_back();
-      Current->OutNum = NextNum++;
+      CurrentTN->OutNum = NextNum++;
       continue;
     }
 
-    Visited.insert(Current);
-    Current->InNum = NextNum++;
-    for (DTNode *C : *Current)
-      WorkList.push_back(C);
+    CurrentTN->InNum = NextNum++;
+    Current.setInt(true);
+    for (DTNode *C : *CurrentTN)
+      WorkList.push_back({C, false});
   }
 
   isInOutValid = true;
