@@ -609,6 +609,11 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, DominatorTree *DT) {
   }
 
   NewDomTree NDT(&PredBB->getParent()->getEntryBlock());
+  DEBUG(PredBB->getParent()->dump());
+  DEBUG(dbgs() << "Merge " << PredBB->getName() << " into "
+               << DestBB->getName() << "\n");
+  DEBUG(dbgs().flush());
+
 
   // Anything that branched to PredBB now branches to DestBB.
   PredBB->replaceAllUsesWith(DestBB);
@@ -627,13 +632,17 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, DominatorTree *DT) {
       DT->changeImmediateDominator(DestBB, PredBBIDom);
       DT->eraseNode(PredBB);
     }
+  } else {
+    DEBUG(NDT.dump());
+    NDT.mergeBlocks(PredBB, DestBB);
+    DEBUG(NDT.dump());
+    NDT.verify(NewDomTree::Verification::Normal);
+    if (DT)
+      NDT.toOldDT(*DT);
   }
 
   // Nuke BB.
   PredBB->eraseFromParent();
-
-  //NDT.replaceWith(NDT.getNode(PredBB), NDT.getNode(DestBB));
-  //NDT.verify(NewDomTree::Verification::Normal);
 }
 
 /// CanMergeValues - Return true if we can choose one of these values to use

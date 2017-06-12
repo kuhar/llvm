@@ -66,7 +66,7 @@ std::chrono::microseconds Time(StringRef Desc, F Fun, int No = -1,
     std::string Buff;
     raw_string_ostream RSO(Buff);
     RSO << '[' << No << '/' << Total << "]\t";
-    RSO << Desc << ": " << ElapsedMs.count() << " us\n";
+    RSO << Desc << "\t" << ElapsedMs.count() << "\tus\n";
     RSO.flush();
     outs() << Buff;
   }
@@ -91,8 +91,7 @@ static void RunOld(Module &M) {
                          ++current, NumFun);
   }
 
-  outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n Old DT: Total time\t"
-         << TotalElapsed.count() << " us\n";
+  outs() << "Old DT\t" << TotalElapsed.count() << "\tus\n";
 }
 
 static void RunNew(Module &M) {
@@ -115,8 +114,7 @@ static void RunNew(Module &M) {
                          ++current, NumFun);
   }
 
-  outs() << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n New DT: Total time\t"
-         << TotalElapsed.count() << " us\n";
+  outs() << "New DT\t" << TotalElapsed.count() << "\tus\n";
 }
 
 int main(int argc, char **argv) {

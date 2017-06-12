@@ -589,24 +589,30 @@ void NewDomTree::eraseNode(DTNode *TN) {
   TreeNodes.erase(TN->BB);
 }
 
-void NewDomTree::replaceWith(DTNode *Replace, DTNode *With) {
-  for (auto &BlockToTN : TreeNodes) {
-    auto *TN = BlockToTN.second.get();
-    if (TN->IDom == Replace)
-      TN->IDom = With;
-    if (TN->RDom == Replace)
-      TN->RDom = With;
-    if (TN->PreorderParent == Replace)
-      TN->PreorderParent = With;
-  }
+void NewDomTree::mergeBlocks(DTNode *Merge, DTNode *Down) {
+  assert(Down->IDom == Merge);
+  assert(Down->Level = Merge->Level + 1);
+  assert(Merge->getNumChildren() == 1);
+  assert(Down->PreorderParent == Merge);
+  assert(Down->RDom == Merge);
 
-  if (getNode(Entry) == Replace)
-    Entry = With->BB;
+  Down->IDom = Merge->IDom;
+  Down->IDom->addChild(Down);
+  Down->RDom = Merge->RDom;
+  Down->PreorderParent = Merge->PreorderParent;
+  Merge->Children.clear();
+  eraseNode(Merge);
 
-  eraseNode(Replace);
-  for (auto *C : *With)
-    updateLevels(C);
+  updateLevels(Down);
+
   isInOutValid = false;
+}
+
+void NewDomTree::mergeBlocks(BlockTy Merge, BlockTy Down) {
+  if (!contains(Merge) && !contains(Down))
+    return;
+
+  mergeBlocks(getNode(Merge), getNode(Down));
 }
 
 void NewDomTree::updateLevels(DTNode *Start) {

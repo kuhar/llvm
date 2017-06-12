@@ -116,7 +116,7 @@ public:
 
   NewDomTree(BlockTy Entry) : Entry(Entry) {
     computeReachableDominators(Entry, 0);
-    // recomputeInOutNums();
+    //recomputeInOutNums();
   }
 
   bool contains(BlockTy N) const;
@@ -135,7 +135,8 @@ public:
   void deleteArc(BlockTy From, BlockTy To);
 
   void eraseNode(DTNode *TN);
-  void replaceWith(DTNode *Replace, DTNode *With);
+  void mergeBlocks(DTNode *Merge, DTNode *Down);
+  void mergeBlocks(BlockTy Merge, BlockTy Down);
 
   void toOldDT(DominatorTree &DT) const;
 
