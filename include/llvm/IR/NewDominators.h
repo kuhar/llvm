@@ -36,16 +36,6 @@ class Instruction;
 class Module;
 class raw_ostream;
 
-struct NodeByName {
-  bool operator()(const BasicBlock *First, const BasicBlock *Second) const {
-    const auto Cmp = First->getName().compare_numeric(Second->getName());
-    if (Cmp == 0)
-      return less{}(First, Second);
-
-    return Cmp < 0;
-  }
-};
-
 class DTNode {
 public:
   using BlockTy = BasicBlock *;
@@ -87,7 +77,7 @@ public:
 
   bool hasChild(BlockTy ChildBB) const { return findChild(ChildBB) != end(); }
 
-  StringRef getName() const { return BB->getName(); }
+  StringRef getName() const { return BB ? BB->getName() : "virtual_entry"; }
   void dump(raw_ostream &OS = dbgs()) const;
 
 private:
@@ -95,6 +85,7 @@ private:
   DTNode(BlockTy Block) : BB(Block) {}
 
   void setIDom(DTNode *NewIDom);
+  bool isVirtualEntry() { return BB = nullptr; }
 
   BasicBlock *BB;
   DTNode *IDom = nullptr;
@@ -114,9 +105,12 @@ public:
   using BlockTy = DTNode::BlockTy;
   using Index = DTNode::Index;
 
-  NewDomTree(BlockTy Entry) : Entry(Entry) {
-    computeReachableDominators(Entry, 0);
-    //recomputeInOutNums();
+  NewDomTree() : VirtualEntry(new DTNode(nullptr)), isInOutValid(true) {}
+
+  NewDomTree(BlockTy Entry) : VirtualEntry(new DTNode(nullptr)), Entry(Entry) {
+    SmallVector<std::pair<BlockTy, DTNode *>, 0> Temp;
+    computeUnreachableDominators(Entry, VirtualEntry.get(), Temp);
+    // recomputeInOutNums();
   }
 
   bool contains(BlockTy N) const;
@@ -166,6 +160,7 @@ public:
   void dumpLegacyDomTree() const;
 
 private:
+  std::unique_ptr<DTNode> VirtualEntry;
   BlockTy Entry = nullptr;
   DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;
   mutable bool isInOutValid = false;
@@ -173,7 +168,6 @@ private:
   DTNode *addNode(BlockTy BB);
   DTNode *getOrAddNode(BlockTy BB);
 
-  void computeReachableDominators(BlockTy Root, Index MinLevel);
   void computeUnreachableDominators(
       BlockTy Root, DTNode *Incoming,
       SmallVectorImpl<std::pair<BlockTy, DTNode *>> &DiscoveredConnectingArcs);
@@ -194,7 +188,7 @@ private:
   template <typename DescendCondition>
   static DFSResult runDFS(BlockTy Start, DescendCondition Condition);
 
-  void semiNCA(DFSResult &DFS, Index MinLevel, DTNode *AttachTo = nullptr);
+  void semiNCA(DFSResult &DFS, Index MinLevel, DTNode *AttachTo);
 
   struct SNCAInfo {
     BlockTy Label;
@@ -256,9 +250,11 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
       continue;
 
     auto &BBInfo = Res.NodeToInfo[BB];
-    BBInfo.Num = NextDFSNum;
+    BBInfo.Num = NextDFSNum++;
+    dbgs() << "Num set " << BB->getName() << ": " << BBInfo.Num << ", ";
     Res.NumToNode.push_back(BB);
-    ++NextDFSNum;
+    dbgs() << "NumToNode size: " << Res.NumToNode.size() << "\n";
+
     Visited.insert(BB);
     for (auto *Succ : successors(BB)) {
       auto &SuccInfo = Res.NodeToInfo[Succ];

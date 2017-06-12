@@ -74,7 +74,7 @@ void DTNode::dump(raw_ostream &OS) const {
 }
 
 void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
-                         DTNode *const AttachTo /* = nullptr */) {
+                         DTNode *const AttachTo) {
   const Index NextDFSNum = static_cast<Index>(DFS.NumToNode.size());
   assert(NextDFSNum > 0 && "DFS not run?");
 
@@ -103,17 +103,12 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
 
   assert(RootTreeNode);
 
-  if (AttachTo && RootTreeNode->IDom) {
-    // Detach from previous idom.
-    if (RootTreeNode->IDom->hasChild(RootTreeNode))
-      RootTreeNode->IDom->removeChild(RootTreeNode);
-  }
+  // Detach from previous idom.
+  if (RootTreeNode->IDom && RootTreeNode->IDom->hasChild(RootTreeNode))
+    RootTreeNode->IDom->removeChild(RootTreeNode);
 
   RootTreeNode->IDom = RootTreeNode;
-  if (Root == Entry || !AttachTo)
-    RootTreeNode->Level = 0;
-  else
-    RootTreeNode->Level = AttachTo->Level + 1;
+  RootTreeNode->Level = AttachTo->Level + 1;
 
   // Step 1: compute semidominators.
   for (Index i = LastNum; i > 0; --i) {
@@ -168,9 +163,6 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   }
 
   DEBUG(dbgs() << "Entry " << Entry->getName() << "\n");
-  if (!AttachTo)
-    return;
-
   DEBUG(dbgs() << "Attaching Root " << RootTreeNode->getName() << " to "
                << AttachTo->getName() << "\n");
 
@@ -180,6 +172,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   }
 
   RootTreeNode->RDom = AttachTo;
+  RootTreeNode->PreorderParent = AttachTo;
 }
 
 // Non-recursive union-find-based semidominator path walker.
@@ -235,26 +228,6 @@ DTNode *NewDomTree::getOrAddNode(BlockTy BB) {
   return addNode(BB);
 }
 
-void NewDomTree::computeReachableDominators(BlockTy Root, Index MinLevel) {
-  auto LevelDescender = [MinLevel, this](BlockTy, BlockTy To) {
-    return !contains(To) || getNode(To)->Level > MinLevel;
-  };
-
-  auto DFSRes = runDFS(Entry, LevelDescender);
-  for (auto &NodeToInfo : DFSRes.NodeToInfo) {
-    DEBUG(dbgs() << "Processing reachable Node -> preorder Parent arc:\n");
-    DEBUG(dbgs() << "\t\t\t" << NameOrNullptrStr(NodeToInfo.first) << " -> "
-                 << NameOrNullptrStr(NodeToInfo.second.Parent) << "\n");
-    const auto Parent = NodeToInfo.second.Parent;
-    if (Parent)
-      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
-  }
-
-  DEBUG(DFSRes.dumpDFSNumbering());
-
-  semiNCA(DFSRes, MinLevel);
-}
-
 void NewDomTree::computeUnreachableDominators(
     BlockTy Root, DTNode *const Incoming,
     SmallVectorImpl<std::pair<BlockTy, DTNode *>> &DiscoveredConnectingArcs) {
@@ -286,9 +259,8 @@ void NewDomTree::computeUnreachableDominators(
 bool NewDomTree::contains(BlockTy BB) const { return TreeNodes.count(BB) != 0; }
 
 DTNode *NewDomTree::findNCA(DTNode *First, DTNode *Second) const {
-  DTNode *const EntryTreeNode = getNode(Entry);
-  if (First == EntryTreeNode || Second == EntryTreeNode)
-    return EntryTreeNode;
+  if (First == VirtualEntry.get() || Second == VirtualEntry.get())
+    return VirtualEntry.get();
 
   while (First != Second) {
     const Index LFirst = First->Level;
@@ -562,8 +534,7 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
     DEBUG(dbgs() << "Erasing node info " << N->getName() << " (level "
                  << TN->Level << ", idom " << TN->IDom->getName() << ")\n");
 
-    eraseNode(TN); // TODO: Should we keep it around for the TN not to
-                   // reappear under a different address?
+    eraseNode(TN);
   }
 
   if (MinNode == ToTN)
@@ -629,7 +600,7 @@ void NewDomTree::updateLevels(DTNode *Start) {
 
 void NewDomTree::recomputeInOutNums() const {
   using PairT = PointerIntPair<DTNode *, 1, bool>;
-  SmallVector<PairT, 64> WorkList = {{getNode(Entry), false}};
+  SmallVector<PairT, 64> WorkList = {{VirtualEntry.get(), false}};
 
   Index NextNum = 0;
   while (!WorkList.empty()) {
@@ -659,12 +630,13 @@ void NewDomTree::toOldDT(DominatorTree &DT) const {
   LevelsNodes.reserve(TreeNodes.size());
 
   for (auto &TN : TreeNodes)
-    LevelsNodes.push_back({TN.second->Level, TN.second.get()});
+    if (TN.second != VirtualEntry)
+      LevelsNodes.push_back({TN.second->Level, TN.second.get()});
 
   std::sort(LevelsNodes.begin(), LevelsNodes.end());
 
   for (auto LN : LevelsNodes)
-    if (LN.second->BB != Entry)
+    if (LN.second != getNode(Entry))
       Temp.addNewBlock(LN.second->BB, LN.second->IDom->BB);
 
   Temp.updateDFSNumbers();
@@ -728,7 +700,7 @@ bool NewDomTree::verifyWithOldDT() const {
   bool Correct = true;
 
   for (const auto &BlockToNode : TreeNodes) {
-    if (BlockToNode.first == Entry)
+    if (BlockToNode.second == VirtualEntry || BlockToNode.first == Entry)
       continue;
 
     auto Node = BlockToNode.first;
@@ -818,11 +790,12 @@ bool NewDomTree::verifyReachability() const {
 bool NewDomTree::verifyParentProperty() const {
   bool Correct = true;
   for (const auto &BlockToNode : TreeNodes) {
+    if (BlockToNode.second->IDom == VirtualEntry.get() ||
+        BlockToNode.second->IDom->BB == Entry)
+      continue;
+
     const auto IDom = BlockToNode.second->IDom->BB;
     const auto Target = BlockToNode.first;
-
-    if (IDom == Entry)
-      continue;
 
     auto SkipIDom = [&](BlockTy, BlockTy Succ) { return Succ != IDom; };
     auto DFSRes = runDFS(Entry, SkipIDom);
@@ -837,7 +810,6 @@ bool NewDomTree::verifyParentProperty() const {
 
       DFSRes.dumpDFSNumbering(errs());
       Correct = false;
-      abort();
     }
   }
 
@@ -878,14 +850,15 @@ void NewDomTree::print(raw_ostream &OS) const {
   if (!isInOutValid)
     recomputeInOutNums();
 
-  printImpl(OS, getNode(Entry));
+  printImpl(OS, VirtualEntry.get());
 }
 
 void NewDomTree::printImpl(raw_ostream &OS, const DTNode *TN) const {
   for (Index i = 0; i <= TN->Level; ++i)
     OS << "  ";
-  OS << '[' << (TN->Level + 1) << "] %" << TN->getName() << " {" << TN->InNum
-     << ", " << TN->OutNum << "}\n";
+  OS << '[' << (TN->Level) << "] %" << TN->getName() << " IO{" << TN->InNum
+     << ", " << TN->OutNum << "}, R{" << NameOrNullptrStr(TN->RDom)
+     << "}, P{" << NameOrNullptrStr(TN->PreorderParent) << "}\n";
 
   SmallVector<DTNode *, 8> Ch(TN->begin(), TN->end());
   std::sort(Ch.begin(), Ch.end(),
@@ -922,6 +895,9 @@ void NewDomTree::addDebugInfoToIR() {
   auto *IntTy = IntegerType::get(M->getContext(), 1);
 
   for (const auto &BlockToNode : TreeNodes) {
+    if (BlockToNode.second == VirtualEntry)
+      continue;
+
     auto BB = BlockToNode.first;
     auto ID = BlockToNode.second->IDom->BB;
 
