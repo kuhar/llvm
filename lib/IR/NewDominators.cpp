@@ -81,8 +81,8 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   DenseMap<BlockTy, SNCAInfo> SNCA;
   SNCA.reserve(NextDFSNum);
   const Index LastNum = NextDFSNum - 1;
-  DEBUG(dbgs() << "StartNum: " << 0 << ": "
-               << DFS.NumToNode.front()->getName() << "\n");
+  DEBUG(dbgs() << "StartNum: " << 0 << ": " << DFS.NumToNode.front()->getName()
+               << "\n");
   DEBUG(dbgs() << "LastNum: " << LastNum << ": "
                << DFS.NumToNode.back()->getName() << "\n");
 
@@ -890,8 +890,8 @@ void NewDomTree::printImpl(raw_ostream &OS, const DTNode *TN) const {
   for (Index i = 0; i <= TN->Level; ++i)
     OS << "  ";
   OS << '[' << (TN->Level) << "] %" << TN->getName() << " IO{" << TN->InNum
-     << ", " << TN->OutNum << "}, R{" << NameOrNullptrStr(TN->RDom)
-     << "}, P{" << NameOrNullptrStr(TN->PreorderParent) << "}\n";
+     << ", " << TN->OutNum << "}, R{" << NameOrNullptrStr(TN->RDom) << "}, P{"
+     << NameOrNullptrStr(TN->PreorderParent) << "}\n";
 
   SmallVector<DTNode *, 8> Ch(TN->begin(), TN->end());
   std::sort(Ch.begin(), Ch.end(),

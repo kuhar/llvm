@@ -34,8 +34,8 @@ struct GraphCFG {
     function = cast<Function>(module.getOrInsertFunction("dummy_f", FTy));
   }
 
-  std::pair<BasicBlock *, BasicBlock *> getArc(
-      std::pair<unsigned, unsigned> arc) {
+  std::pair<BasicBlock *, BasicBlock *>
+  getArc(std::pair<unsigned, unsigned> arc) {
     return {numToBB[arc.first], numToBB[arc.second]};
   };
 };
@@ -73,7 +73,7 @@ struct InputGraph {
   };
   Optional<CFGUpdate> applyUpdate(bool UpdateIR = true);
 
- private:
+private:
   bool connect(const Arc &A);
   bool disconnect(const Arc &A);
 };
@@ -81,6 +81,6 @@ struct InputGraph {
 void connect(BasicBlock *From, BasicBlock *To);
 void disconnect(BasicBlock *From, BasicBlock *To);
 
-}  // end namespace llvm
+} // end namespace llvm
 
-#endif  // LLVM_IR_DOM_SUPPORT_H
+#endif // LLVM_IR_DOM_SUPPORT_H
