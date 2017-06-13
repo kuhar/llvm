@@ -278,8 +278,8 @@ DTNode *NewDomTree::findNCA(DTNode *First, DTNode *Second) const {
 bool NewDomTree::dominates(DTNode *Src, DTNode *Dst) const {
   if (Dst->IDom == Src)
     return true;
-
-  if (Src->IDom == Dst)
+  
+  if (Src->Level > Dst->Level)
     return false;
 
   if (!isInOutValid)
