@@ -624,25 +624,25 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB, DominatorTree *DT) {
 
   // If the PredBB is the entry block of the function, move DestBB up to
   // become the entry block after we erase PredBB.
-  if (PredBB == &DestBB->getParent()->getEntryBlock()) {
+  if (PredBB == &DestBB->getParent()->getEntryBlock())
     DestBB->moveAfter(PredBB);
 
-    if (DT) {
-      BasicBlock *PredBBIDom = DT->getNode(PredBB)->getIDom()->getBlock();
-      DT->changeImmediateDominator(DestBB, PredBBIDom);
-      DT->eraseNode(PredBB);
-    }
-  } else {
-    DEBUG(NDT.dump());
-    NDT.mergeBlocks(PredBB, DestBB);
-    DEBUG(NDT.dump());
-    NDT.verify(NewDomTree::Verification::Normal);
-    if (DT)
-      NDT.toOldDT(*DT);
-  }
+//  if (DT) {
+//    BasicBlock *PredBBIDom = DT->getNode(PredBB)->getIDom()->getBlock();
+//    DT->changeImmediateDominator(DestBB, PredBBIDom);
+//    DT->eraseNode(PredBB);
+//  }
+
+  DEBUG(NDT.dump());
+  NDT.mergeBlocks(PredBB, DestBB);
+  DEBUG(NDT.dump());
 
   // Nuke BB.
   PredBB->eraseFromParent();
+
+  NDT.verify(NewDomTree::Verification::Normal);
+  if (DT)
+    NDT.toOldDT(*DT);
 }
 
 /// CanMergeValues - Return true if we can choose one of these values to use

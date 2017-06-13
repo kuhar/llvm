@@ -107,9 +107,8 @@ public:
 
   NewDomTree() : VirtualEntry(new DTNode(nullptr)), isInOutValid(true) {}
 
-  NewDomTree(BlockTy Entry) : VirtualEntry(new DTNode(nullptr)), Entry(Entry) {
-    SmallVector<std::pair<BlockTy, DTNode *>, 0> Temp;
-    computeUnreachableDominators(Entry, VirtualEntry.get(), Temp);
+  NewDomTree(BlockTy NewEntry) : VirtualEntry(new DTNode(nullptr)) {
+    setEntry(NewEntry);
     // recomputeInOutNums();
   }
 

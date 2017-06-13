@@ -573,6 +573,9 @@ void NewDomTree::mergeBlocks(DTNode *Merge, DTNode *Down) {
   Down->RDom = Merge->RDom;
   Down->PreorderParent = Merge->PreorderParent;
   Merge->Children.clear();
+  if (Merge->BB == Entry)
+    Entry = Down->BB;
+
   eraseNode(Merge);
 
   updateLevels(Down);
@@ -588,25 +591,32 @@ void NewDomTree::mergeBlocks(BlockTy Merge, BlockTy Down) {
 }
 
 void NewDomTree::setEntry(BlockTy NewEntry) {
-  DTNode *const NewEntryTN = getNode(NewEntry);
-  assert(NewEntryTN);
+  isInOutValid = false;
 
-  isInOutValid = false; // FIXME: Possible to optimize this case.
-
-  if (NewEntryTN->IDom) {
-    assert(NewEntryTN->IDom->BB == Entry);
-    assert(NewEntryTN->IDom->getNumChildren() == 1);
-    // FIXME: Otherwise just run semiNCA starting from the new entry.
-    eraseNode(NewEntryTN->IDom);
+  auto NewEntryIt = TreeNodes.find(NewEntry);
+  if (NewEntryIt != TreeNodes.end() && NewEntryIt->second->IDom) {
+    if (NewEntryIt->second->IDom->BB == Entry &&
+        NewEntryIt->second->IDom->getNumChildren() == 1) {
+      mergeBlocks(NewEntryIt->second->IDom, NewEntryIt->second.get());
+      Entry = NewEntry;
+      return;
+    }
   }
 
-  NewEntryTN->IDom = VirtualEntry.get();
-  VirtualEntry->addChild(NewEntryTN);
-  NewEntryTN->PreorderParent = VirtualEntry.get();
-  NewEntryTN->RDom = VirtualEntry.get();
-  NewEntryTN->Level = VirtualEntry->Level + 1;
+  TreeNodes.clear();
+  Entry = NewEntry;
+  auto DFSRes = runDFS(NewEntry, [](BlockTy, BlockTy) { return true; });
+  for (auto &NodeToInfo : DFSRes.NodeToInfo) {
+    const auto Parent = NodeToInfo.second.Parent;
+    if (Parent)
+      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
+  }
 
-  updateLevels(NewEntryTN); // FIXME: Possible to optimize this case.
+  DEBUG(DFSRes.dumpDFSNumbering());
+  semiNCA(DFSRes, 0, VirtualEntry.get());
+  DTNode *const NEN = getNode(NewEntry);
+  NEN->PreorderParent = VirtualEntry.get();
+  NEN->RDom = VirtualEntry.get();
 }
 
 void NewDomTree::updateLevels(DTNode *Start) {
