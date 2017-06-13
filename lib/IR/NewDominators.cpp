@@ -82,7 +82,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
   SNCA.reserve(NextDFSNum);
   const Index LastNum = NextDFSNum - 1;
   DEBUG(dbgs() << "StartNum: " << 0 << ": "
-               << DFS.NumToNode.back()->getName() << "\n");
+               << DFS.NumToNode.front()->getName() << "\n");
   DEBUG(dbgs() << "LastNum: " << LastNum << ": "
                << DFS.NumToNode.back()->getName() << "\n");
 
@@ -170,9 +170,6 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
     RootTreeNode->IDom = AttachTo;
     AttachTo->addChild(RootTreeNode);
   }
-
-  RootTreeNode->RDom = AttachTo;
-  RootTreeNode->PreorderParent = AttachTo;
 }
 
 // Non-recursive union-find-based semidominator path walker.
@@ -254,6 +251,9 @@ void NewDomTree::computeUnreachableDominators(
   DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, /* MinLevel = */ 0, Incoming);
+  DTNode *RootTN = getNode(DFSRes.NumToNode.front());
+  RootTN->RDom = Incoming;
+  RootTN->PreorderParent = Incoming;
 }
 
 bool NewDomTree::contains(BlockTy BB) const { return TreeNodes.count(BB) != 0; }
@@ -402,6 +402,7 @@ void NewDomTree::updateInsertion(DTNode *NCA, InsertionInfo &II) {
                  << " + 1\n");
 
     TN->Level = NCA->Level + 1;
+    TN->RDom = nullptr;
     TN->PreorderParent = nullptr;
   }
 

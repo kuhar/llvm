@@ -251,20 +251,21 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
 
     auto &BBInfo = Res.NodeToInfo[BB];
     BBInfo.Num = NextDFSNum++;
-    dbgs() << "Num set " << BB->getName() << ": " << BBInfo.Num << ", ";
     Res.NumToNode.push_back(BB);
-    dbgs() << "NumToNode size: " << Res.NumToNode.size() << "\n";
 
     Visited.insert(BB);
     for (auto *Succ : successors(BB)) {
       auto &SuccInfo = Res.NodeToInfo[Succ];
       if (Succ != BB)
         SuccInfo.Predecessors.push_back(BB);
-      if (Visited.count(Succ) == 0)
+
+      if (Visited.count(Succ) == 0) {
         if (Condition(BB, Succ)) {
           WorkList.push_back(Succ);
           SuccInfo.Parent = BB;
-        }
+        } else
+          Res.NodeToInfo.erase(Succ);
+      }
     }
   }
 
