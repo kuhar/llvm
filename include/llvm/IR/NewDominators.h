@@ -242,7 +242,7 @@ NewDomTree::DFSResult NewDomTree::runDFS(BlockTy Start,
   Res.NodeToInfo[Start].Parent = nullptr;
   WorkList.push_back(Start);
 
-  // Compute preorder numbers nad parents.
+  // Compute preorder numbers and parents.
   while (!WorkList.empty()) {
     BlockTy BB = WorkList.back();
     WorkList.pop_back();

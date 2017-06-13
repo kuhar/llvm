@@ -52,6 +52,18 @@ static bool isBitcodeFile(StringRef Filename) {
   return Filename.endswith(".bc");
 }
 
+static std::unique_ptr<Module> ReadModule(StringRef Filename) {
+  auto *Context = new LLVMContext();
+  SMDiagnostic Diags;
+  auto M = parseIRFile(Filename, Diags, *Context);
+  if (!M) {
+    Diags.print("dominators", errs());
+    return nullptr;
+  }
+
+  return M;
+}
+
 static void updateGraph(InputGraph &IG, bool UpdateIR) {
   unsigned UpdatesRequested = 0;
   if (ApplyAll)
@@ -107,31 +119,17 @@ static std::error_code outputIR(InputGraph &IG) {
 }
 
 static Optional<InputGraph> readGraph() {
-  if (isIRFile(InputFile)) {
-    errs() << "The tool cannot read textual IR files\n";
-    return None;
-  }
-
   if (isGraphFile(InputFile))
     return InputGraph::readFromFile(InputFile);
 
-  if (isBitcodeFile(InputFile)) {
-    auto *Context = new LLVMContext();
-    SMDiagnostic Diags;
-    auto M = parseIRFile(InputFile, Diags, *Context);
-    if (!M) {
-      Diags.print(InputFile.c_str(), errs());
-      return None;
-    }
+  if (isBitcodeFile(InputFile) || isIRFile(InputFile)) {
+    auto M = ReadModule(InputFile);
 
     if (M->getFunctionList().size() != 1) {
       errs() << "Input modules must have exactly one function, not "
              << M->getFunctionList().size() << "\n";
       return None;
     }
-
-    if (ViewCFG)
-      M->getFunctionList().front().viewCFG();
 
     return InputGraph::fromModule(*M);
   }
@@ -176,6 +174,33 @@ int main(int argc, char **argv) {
   if (!validateConsoleFlags())
     return 1;
 
+  if (!ToGraph && !ToIR && (isIRFile(InputFile) || isBitcodeFile(InputFile))) {
+    auto M = ReadModule(InputFile);
+    if (!M)
+      return 1;
+
+    if (ViewCFG && M->getFunctionList().size() > 10) {
+      errs() << "Module has more than 10 functions and -view-cfg is set.\n";
+      errs() << "Ignoring -view-cfg.\n";
+      errs().flush();
+      ViewCFG = false;
+    }
+
+    for (auto &F : M->functions()) {
+      if (F.empty())
+        continue;
+
+      outs() << "~~~~~~~~~~~~~~\nRunning on function " << F.getName() << "\n";
+      NewDomTree DT(&F.getEntryBlock());
+      DT.print(outs());
+      if (!DT.verify(NewDomTree::Verification::Full)) {
+        errs() << "NewDomTree verification failed.\n";
+        return 1;
+      }
+    }
+
+    return 0;
+  }
   auto Graph = readGraph();
   if (!Graph) {
     errs() << "Invalid input graph\n";

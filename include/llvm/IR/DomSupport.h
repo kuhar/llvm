@@ -55,7 +55,6 @@ struct InputGraph {
     Arc arc;
   };
   std::vector<Update> updates;
-
   std::unique_ptr<GraphCFG> cfg;
 
   static Optional<InputGraph> readFromFile(const std::string &filename);
