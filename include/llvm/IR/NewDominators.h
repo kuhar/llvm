@@ -126,11 +126,13 @@ public:
   bool dominates(DTNode *Src, DTNode *Dst) const;
 
   void insertArc(BlockTy From, BlockTy To);
+  void deleteArc(DTNode *From, DTNode *To);
   void deleteArc(BlockTy From, BlockTy To);
 
   void eraseNode(DTNode *TN);
   void mergeBlocks(DTNode *Merge, DTNode *Down);
   void mergeBlocks(BlockTy Merge, BlockTy Down);
+  void setEntry(BlockTy NewEntry);
 
   void toOldDT(DominatorTree &DT) const;
 

@@ -276,9 +276,9 @@ DTNode *NewDomTree::findNCA(DTNode *First, DTNode *Second) const {
 }
 
 bool NewDomTree::dominates(DTNode *Src, DTNode *Dst) const {
-  if (Dst->IDom == Src)
+  if (Dst == Src || Dst->IDom == Src)
     return true;
-  
+
   if (Src->Level > Dst->Level)
     return false;
 
@@ -585,6 +585,28 @@ void NewDomTree::mergeBlocks(BlockTy Merge, BlockTy Down) {
     return;
 
   mergeBlocks(getNode(Merge), getNode(Down));
+}
+
+void NewDomTree::setEntry(BlockTy NewEntry) {
+  DTNode *const NewEntryTN = getNode(NewEntry);
+  assert(NewEntryTN);
+
+  isInOutValid = false; // FIXME: Possible to optimize this case.
+
+  if (NewEntryTN->IDom) {
+    assert(NewEntryTN->IDom->BB == Entry);
+    assert(NewEntryTN->IDom->getNumChildren() == 1);
+    // FIXME: Otherwise just run semiNCA starting from the new entry.
+    eraseNode(NewEntryTN->IDom);
+  }
+
+  NewEntryTN->IDom = VirtualEntry.get();
+  VirtualEntry->addChild(NewEntryTN);
+  NewEntryTN->PreorderParent = VirtualEntry.get();
+  NewEntryTN->RDom = VirtualEntry.get();
+  NewEntryTN->Level = VirtualEntry->Level + 1;
+
+  updateLevels(NewEntryTN); // FIXME: Possible to optimize this case.
 }
 
 void NewDomTree::updateLevels(DTNode *Start) {
