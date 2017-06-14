@@ -624,6 +624,7 @@ void NewDomTree::recalculate() {
     return;
 
   TreeNodes.clear();
+  ErasedIDs.clear();
   NextID = 1;
 
   auto DFSRes = runDFS(Entry, [](BlockTy, BlockTy) { return true; });
