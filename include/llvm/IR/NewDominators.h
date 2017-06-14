@@ -40,6 +40,8 @@ class DTNode {
 public:
   using BlockTy = BasicBlock *;
   using Index = unsigned;
+  using IDTy = unsigned long long;
+  static constexpr IDTy InvalidID = static_cast<IDTy>(-1);
 
   BlockTy getBlock() const { return BB; }
   DTNode *getIDom() const { return IDom; }
@@ -82,17 +84,18 @@ public:
 
 private:
   friend class NewDomTree;
-  DTNode(BlockTy Block) : BB(Block) {}
+  DTNode(BlockTy Block, IDTy ID) : ID(ID), BB(Block) {}
 
   void setIDom(DTNode *NewIDom);
   bool isVirtualEntry() { return BB = nullptr; }
 
+  IDTy ID;
   BasicBlock *BB;
   DTNode *IDom = nullptr;
   Index Level = 0;
   ChildrenTy Children;
-  DTNode *RDom = nullptr;
-  DTNode *PreorderParent = nullptr;
+  IDTy RDomID = InvalidID;
+  IDTy PreorderParentID = InvalidID;
   mutable Index InNum = 0;
   mutable Index OutNum = 0;
 
@@ -105,8 +108,9 @@ public:
   using BlockTy = DTNode::BlockTy;
   using Index = DTNode::Index;
 
-  NewDomTree() : VirtualEntry(new DTNode(nullptr)), isInOutValid(true) {}
-  NewDomTree(BlockTy NewEntry) : VirtualEntry(new DTNode(nullptr)),
+  NewDomTree() : VirtualEntry(new DTNode(nullptr, NextID++)),
+                 isInOutValid(true) {}
+  NewDomTree(BlockTy NewEntry) : VirtualEntry(new DTNode(nullptr, NextID++)),
                                  Entry(NewEntry) {
     recalculate();
     // recomputeInOutNums();
@@ -163,6 +167,7 @@ public:
   void dumpLegacyDomTree() const;
 
 private:
+  DTNode::IDTy NextID = 0;
   std::unique_ptr<DTNode> VirtualEntry;
   BlockTy Entry = nullptr;
   DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;

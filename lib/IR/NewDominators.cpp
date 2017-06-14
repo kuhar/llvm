@@ -61,10 +61,23 @@ template <typename T> static StringRef NameOrNullptrStr(T *V) {
   return V ? V->getName() : "nullptr";
 }
 
+static std::string IDOrInvalid(DTNode::IDTy ID) {
+  std::string Buff;
+  raw_string_ostream RSO(Buff);
+  if (ID == DTNode::InvalidID)
+    RSO << "Invalid";
+  else
+    RSO << ID;
+
+  RSO.flush();
+
+  return Buff;
+}
+
 void DTNode::dump(raw_ostream &OS) const {
   OS << "DTNode{ " << BB->getName() << ", IDom(" << NameOrNullptrStr(IDom)
-     << "), Level(" << Level << "), RDom(" << NameOrNullptrStr(RDom)
-     << "), PreorderParent(" << NameOrNullptrStr(PreorderParent) << ")\n"
+     << "), Level(" << Level << "), RDomID(" << IDOrInvalid(RDomID)
+     << "), PreorderParent(" << IDOrInvalid(PreorderParentID) << ")\n"
      << "\tChildren: [";
 
   for (auto *Child : *this)
@@ -73,7 +86,8 @@ void DTNode::dump(raw_ostream &OS) const {
   OS << "]\n";
 }
 
-NewDomTree::NewDomTree(Function &F) : VirtualEntry(new DTNode(nullptr)) {
+NewDomTree::NewDomTree(Function &F)
+    : VirtualEntry(new DTNode(nullptr, NextID++)) {
   if (F.empty()) {
     isInOutValid = true;
     return;
@@ -145,7 +159,7 @@ void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
       if (DFS.NodeToInfo[CurrentSNCAInfo.SDom].Num >
           DFS.NodeToInfo[CandidateInfo.SDom].Num) {
         CurrentSNCAInfo.SDom = CandidateInfo.SDom;
-        CurrentTreeNode->RDom = getNode(SDomCandidate);
+        CurrentTreeNode->RDomID = getNode(SDomCandidate)->ID;
       }
     }
     // Update Label for the current Node.
@@ -222,7 +236,8 @@ NewDomTree::getSDomCandidate(const BlockTy Start, const BlockTy Pred,
 DTNode *NewDomTree::addNode(BlockTy BB) {
   assert(!contains(BB));
   // make_unique not used because of the private ctor.
-  auto &TN = (TreeNodes[BB] = std::unique_ptr<DTNode>(new DTNode(BB)));
+  auto &TN = (TreeNodes[BB] =
+                  std::unique_ptr<DTNode>(new DTNode(BB, NextID++)));
   DEBUG(dbgs() << "New DTNode added " << TN->getName() << "\n");
   return TN.get();
 }
@@ -255,15 +270,16 @@ void NewDomTree::computeUnreachableDominators(
   for (auto &NodeToInfo : DFSRes.NodeToInfo) {
     const auto Parent = NodeToInfo.second.Parent;
     if (Parent)
-      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
+      getOrAddNode(NodeToInfo.first)->PreorderParentID =
+          getOrAddNode(Parent)->ID;
   }
 
   DEBUG(DFSRes.dumpDFSNumbering());
 
   semiNCA(DFSRes, /* MinLevel = */ 0, Incoming);
   DTNode *RootTN = getNode(DFSRes.NumToNode.front());
-  RootTN->RDom = Incoming;
-  RootTN->PreorderParent = Incoming;
+  RootTN->RDomID = Incoming->ID;
+  RootTN->PreorderParentID = Incoming->ID;
 }
 
 bool NewDomTree::contains(BlockTy BB) const { return TreeNodes.count(BB) != 0; }
@@ -412,8 +428,8 @@ void NewDomTree::updateInsertion(DTNode *NCA, InsertionInfo &II) {
                  << " + 1\n");
 
     TN->Level = NCA->Level + 1;
-    TN->RDom = nullptr;
-    TN->PreorderParent = nullptr;
+    TN->RDomID = DTNode::InvalidID;
+    TN->PreorderParentID = DTNode::InvalidID;
   }
 
   DEBUG(dbgs() << "Before updating levels\n");
@@ -481,10 +497,10 @@ bool NewDomTree::isReachableFromIDom(DTNode *const TN) {
 }
 
 void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
-  if (isFastDeleteInfoValid && ToTN->PreorderParent &&
-      FromTN != ToTN->PreorderParent) {
-    assert(ToTN->RDom);
-    if (ToTN->RDom != FromTN)
+  if (isFastDeleteInfoValid && ToTN->PreorderParentID != DTNode::InvalidID &&
+      FromTN->ID != ToTN->PreorderParentID) {
+    assert(ToTN->RDomID != DTNode::InvalidID);
+    if (ToTN->RDomID != FromTN->ID)
       return;
   }
 
@@ -504,7 +520,8 @@ void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
   for (auto &NodeToInfo : DFSRes.NodeToInfo) {
     const auto Parent = NodeToInfo.second.Parent;
     if (Parent)
-      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
+      getOrAddNode(NodeToInfo.first)->PreorderParentID =
+          getOrAddNode(Parent)->ID;
   }
   DEBUG(dbgs() << "Running SNCA\n");
   semiNCA(DFSRes, Level, PrevIDomSubTree);
@@ -577,13 +594,11 @@ void NewDomTree::mergeBlocks(DTNode *Merge, DTNode *Down) {
   assert(Down->IDom == Merge);
   assert(Down->Level = Merge->Level + 1);
   assert(Merge->getNumChildren() == 1);
-  assert(Down->PreorderParent == Merge);
-  assert(Down->RDom == Merge);
 
   Down->IDom = Merge->IDom;
   Down->IDom->addChild(Down);
-  Down->RDom = Merge->RDom;
-  Down->PreorderParent = Merge->PreorderParent;
+  Down->RDomID = Merge->RDomID;
+  Down->PreorderParentID = Merge->PreorderParentID;
   Merge->Children.clear();
   if (Merge->BB == Entry)
     Entry = Down->BB;
@@ -606,18 +621,22 @@ void NewDomTree::recalculate() {
   if (!Entry)
     return;
 
+  TreeNodes.clear();
+  NextID = 1;
+
   auto DFSRes = runDFS(Entry, [](BlockTy, BlockTy) { return true; });
   for (auto &NodeToInfo : DFSRes.NodeToInfo) {
     const auto Parent = NodeToInfo.second.Parent;
     if (Parent)
-      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
+      getOrAddNode(NodeToInfo.first)->PreorderParentID =
+          getOrAddNode(Parent)->ID;
   }
 
   DEBUG(DFSRes.dumpDFSNumbering());
   semiNCA(DFSRes, 0, VirtualEntry.get());
   DTNode *const EN = getNode(Entry);
-  EN->PreorderParent = VirtualEntry.get();
-  EN->RDom = VirtualEntry.get();
+  EN->PreorderParentID = VirtualEntry->ID;
+  EN->RDomID = VirtualEntry->ID;
 
   isInOutValid = false;
   isFastDeleteInfoValid = true;
@@ -651,7 +670,7 @@ void NewDomTree::changeImmediateDominator(DTNode *N, DTNode *To) {
   N->IDom->removeChild(N);
   N->IDom = To;
   To->addChild(N);
-  N->RDom = N->PreorderParent = nullptr;
+  N->RDomID = N->PreorderParentID = DTNode::InvalidID;
   isFastDeleteInfoValid = false;
   isInOutValid = false;
 
@@ -928,9 +947,11 @@ void NewDomTree::print(raw_ostream &OS) const {
 void NewDomTree::printImpl(raw_ostream &OS, const DTNode *TN) const {
   for (Index i = 0; i <= TN->Level; ++i)
     OS << "  ";
+
   OS << '[' << (TN->Level) << "] %" << TN->getName() << " IO{" << TN->InNum
-     << ", " << TN->OutNum << "}, R{" << NameOrNullptrStr(TN->RDom) << "}, P{"
-     << NameOrNullptrStr(TN->PreorderParent) << "}\n";
+     << ", " << TN->OutNum << "}, ID{" << IDOrInvalid(TN->ID) << "}, R{"
+     << IDOrInvalid(TN->RDomID) << "}, P{" << IDOrInvalid(TN->PreorderParentID)
+     << "}\n";
 
   SmallVector<DTNode *, 8> Ch(TN->begin(), TN->end());
   std::sort(Ch.begin(), Ch.end(),
@@ -971,22 +992,27 @@ void NewDomTree::addDebugInfoToIR() {
       continue;
 
     auto BB = BlockToNode.first;
-    auto ID = BlockToNode.second->IDom->BB;
+    auto IDom = BlockToNode.second->IDom;
 
     std::string Buffer;
     raw_string_ostream RSO(Buffer);
     IRBuilder<> Builder(BB, BB->begin());
 
-    RSO << "idom___" << ID->getName() << "___";
+    RSO << "id___" << BlockToNode.second->ID << "___";
     RSO.flush();
     Builder.CreateAlloca(IntTy, nullptr, Buffer);
     Buffer.clear();
 
-    auto RD = BlockToNode.second->RDom;
-    if (!RD)
+    RSO << "idom___" << IDom->getName() << "___";
+    RSO.flush();
+    Builder.CreateAlloca(IntTy, nullptr, Buffer);
+    Buffer.clear();
+
+    auto RD = BlockToNode.second->RDomID;
+    if (RD == DTNode::InvalidID)
       continue;
 
-    RSO << "rdom___" << RD->getName() << "___";
+    RSO << "rdom___" << RD << "___";
     RSO.flush();
     Builder.CreateAlloca(IntTy, nullptr, Buffer);
   }
