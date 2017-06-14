@@ -171,6 +171,7 @@ private:
   std::unique_ptr<DTNode> VirtualEntry;
   BlockTy Entry = nullptr;
   DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;
+  DenseSet<DTNode::IDTy> ErasedIDs;
   bool isFastDeleteInfoValid = true;
   mutable bool isInOutValid = false;
 

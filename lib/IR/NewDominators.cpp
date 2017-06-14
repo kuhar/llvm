@@ -500,7 +500,8 @@ void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
   if (isFastDeleteInfoValid && ToTN->PreorderParentID != DTNode::InvalidID &&
       FromTN->ID != ToTN->PreorderParentID) {
     assert(ToTN->RDomID != DTNode::InvalidID);
-    if (ToTN->RDomID != FromTN->ID)
+    if (ToTN->RDomID != FromTN->ID && ErasedIDs.count(ToTN->RDomID) == 0 &&
+        ErasedIDs.count(ToTN->PreorderParentID) == 0)
       return;
   }
 
@@ -587,6 +588,7 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
 void NewDomTree::eraseNode(DTNode *TN) {
   assert(TN->getNumChildren() == 0);
   TN->IDom->removeChild(TN);
+  ErasedIDs.insert(TN->ID);
   TreeNodes.erase(TN->BB);
 }
 
