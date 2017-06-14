@@ -73,6 +73,16 @@ void DTNode::dump(raw_ostream &OS) const {
   OS << "]\n";
 }
 
+NewDomTree::NewDomTree(Function &F) : VirtualEntry(new DTNode(nullptr)) {
+  if (F.empty()) {
+    isInOutValid = true;
+    return;
+  }
+
+  Entry = &F.getEntryBlock();
+  recalculate();
+}
+
 void NewDomTree::semiNCA(DFSResult &DFS, const Index MinLevel,
                          DTNode *const AttachTo) {
   const Index NextDFSNum = static_cast<Index>(DFS.NumToNode.size());
@@ -471,7 +481,8 @@ bool NewDomTree::isReachableFromIDom(DTNode *const TN) {
 }
 
 void NewDomTree::deleteReachable(DTNode *const FromTN, DTNode *const ToTN) {
-  if (ToTN->PreorderParent && FromTN != ToTN->PreorderParent) {
+  if (isFastDeleteInfoValid && ToTN->PreorderParent &&
+      FromTN != ToTN->PreorderParent) {
     assert(ToTN->RDom);
     if (ToTN->RDom != FromTN)
       return;
@@ -524,6 +535,7 @@ void NewDomTree::deleteUnreachable(DTNode *const ToTN) {
   for (const BlockTy N : affectedQueue) {
     DTNode *const TN = getNode(N);
     DTNode *NCA = findNCA(TN, ToTN);
+
     if (NCA != TN && NCA->Level < MinNode->Level)
       MinNode = NCA;
   }
@@ -590,7 +602,31 @@ void NewDomTree::mergeBlocks(BlockTy Merge, BlockTy Down) {
   mergeBlocks(getNode(Merge), getNode(Down));
 }
 
+void NewDomTree::recalculate() {
+  if (!Entry)
+    return;
+
+  auto DFSRes = runDFS(Entry, [](BlockTy, BlockTy) { return true; });
+  for (auto &NodeToInfo : DFSRes.NodeToInfo) {
+    const auto Parent = NodeToInfo.second.Parent;
+    if (Parent)
+      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
+  }
+
+  DEBUG(DFSRes.dumpDFSNumbering());
+  semiNCA(DFSRes, 0, VirtualEntry.get());
+  DTNode *const EN = getNode(Entry);
+  EN->PreorderParent = VirtualEntry.get();
+  EN->RDom = VirtualEntry.get();
+
+  isInOutValid = false;
+  isFastDeleteInfoValid = true;
+}
+
 void NewDomTree::setEntry(BlockTy NewEntry) {
+  if (NewEntry == Entry)
+    return;
+
   isInOutValid = false;
 
   auto NewEntryIt = TreeNodes.find(NewEntry);
@@ -603,20 +639,23 @@ void NewDomTree::setEntry(BlockTy NewEntry) {
     }
   }
 
-  TreeNodes.clear();
   Entry = NewEntry;
-  auto DFSRes = runDFS(NewEntry, [](BlockTy, BlockTy) { return true; });
-  for (auto &NodeToInfo : DFSRes.NodeToInfo) {
-    const auto Parent = NodeToInfo.second.Parent;
-    if (Parent)
-      getOrAddNode(NodeToInfo.first)->PreorderParent = getOrAddNode(Parent);
-  }
+  recalculate();
+}
 
-  DEBUG(DFSRes.dumpDFSNumbering());
-  semiNCA(DFSRes, 0, VirtualEntry.get());
-  DTNode *const NEN = getNode(NewEntry);
-  NEN->PreorderParent = VirtualEntry.get();
-  NEN->RDom = VirtualEntry.get();
+void NewDomTree::changeImmediateDominator(DTNode *N, DTNode *To) {
+  assert(N->IDom);
+  if (N->IDom == To)
+    return;
+
+  N->IDom->removeChild(N);
+  N->IDom = To;
+  To->addChild(N);
+  N->RDom = N->PreorderParent = nullptr;
+  isFastDeleteInfoValid = false;
+  isInOutValid = false;
+
+  updateLevels(N);
 }
 
 void NewDomTree::updateLevels(DTNode *Start) {

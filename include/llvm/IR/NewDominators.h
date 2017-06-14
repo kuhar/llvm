@@ -106,11 +106,12 @@ public:
   using Index = DTNode::Index;
 
   NewDomTree() : VirtualEntry(new DTNode(nullptr)), isInOutValid(true) {}
-
-  NewDomTree(BlockTy NewEntry) : VirtualEntry(new DTNode(nullptr)) {
-    setEntry(NewEntry);
+  NewDomTree(BlockTy NewEntry) : VirtualEntry(new DTNode(nullptr)),
+                                 Entry(NewEntry) {
+    recalculate();
     // recomputeInOutNums();
   }
+  NewDomTree(Function &F);
 
   bool contains(BlockTy N) const;
 
@@ -124,14 +125,15 @@ public:
 
   bool dominates(DTNode *Src, DTNode *Dst) const;
 
+  void recalculate();
   void insertArc(BlockTy From, BlockTy To);
-  void deleteArc(DTNode *From, DTNode *To);
   void deleteArc(BlockTy From, BlockTy To);
 
   void eraseNode(DTNode *TN);
   void mergeBlocks(DTNode *Merge, DTNode *Down);
   void mergeBlocks(BlockTy Merge, BlockTy Down);
   void setEntry(BlockTy NewEntry);
+  void changeImmediateDominator(DTNode *N, DTNode *To);
 
   void toOldDT(DominatorTree &DT) const;
 
@@ -164,6 +166,7 @@ private:
   std::unique_ptr<DTNode> VirtualEntry;
   BlockTy Entry = nullptr;
   DenseMap<BlockTy, std::unique_ptr<DTNode>> TreeNodes;
+  bool isFastDeleteInfoValid = true;
   mutable bool isInOutValid = false;
 
   DTNode *addNode(BlockTy BB);
