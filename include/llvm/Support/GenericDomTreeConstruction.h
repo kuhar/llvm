@@ -141,10 +141,11 @@ typename GraphT::NodeRef Eval(DominatorTreeBaseByGraphTraits<GraphT> &DT,
 template <class FuncT, class NodeT>
 void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
                FuncT &F) {
-  typedef GraphTraits<NodeT> GraphT;
+  using GraphT = GraphTraits<NodeT>;
   static_assert(std::is_pointer<typename GraphT::NodeRef>::value,
                 "NodeRef should be pointer type");
-  typedef typename std::remove_pointer<typename GraphT::NodeRef>::type NodeType;
+  using NodeType = typename std::remove_pointer<typename GraphT::NodeRef>::type;
+  using NodePtr = typename GraphT::NodeRef;
 
   unsigned N = 0;
   bool MultipleRoots = (DT.Roots.size() > 1);
@@ -166,39 +167,22 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
     N = DFSPass<GraphT>(DT, DT.Roots[0], N);
   }
 
-  // it might be that some blocks did not get a DFS number (e.g., blocks of
+  // It might be that some blocks did not get a DFS number (e.g., blocks of
   // infinite loops). In these cases an artificial exit node is required.
   MultipleRoots |= (DT.isPostDominator() && N != GraphTraits<FuncT*>::size(&F));
 
-  // When naively implemented, the Lengauer-Tarjan algorithm requires a separate
-  // bucket for each vertex. However, this is unnecessary, because each vertex
-  // is only placed into a single bucket (that of its semidominator), and each
-  // vertex's bucket is processed before it is added to any bucket itself.
-  //
-  // Instead of using a bucket per vertex, we use a single array Buckets that
-  // has two purposes. Before the vertex V with preorder number i is processed,
-  // Buckets[i] stores the index of the first element in V's bucket. After V's
-  // bucket is processed, Buckets[i] stores the index of the next element in the
-  // bucket containing V, if any.
-  SmallVector<unsigned, 32> Buckets;
-  Buckets.resize(N + 1);
-  for (unsigned i = 1; i <= N; ++i)
-    Buckets[i] = i;
+  // Initialize IDoms to spanning tree parents.
+  for (unsigned i = 1; i <= N; ++i) {
+    const NodePtr V = DT.Vertex[i];
+    DT.IDoms[V] = DT.Vertex[DT.Info[V].Parent];
+  }
 
+  // Step #2: Calculate the semidominators of all vertices
   for (unsigned i = N; i >= 2; --i) {
-    typename GraphT::NodeRef W = DT.Vertex[i];
+    NodePtr W = DT.Vertex[i];
     auto &WInfo = DT.Info[W];
 
-    // Step #2: Implicitly define the immediate dominator of vertices
-    for (unsigned j = i; Buckets[j] != i; j = Buckets[j]) {
-      typename GraphT::NodeRef V = DT.Vertex[Buckets[j]];
-      typename GraphT::NodeRef U = Eval<GraphT>(DT, V, i + 1);
-      DT.IDoms[V] = DT.Info[U].Semi < i ? U : W;
-    }
-
-    // Step #3: Calculate the semidominators of all vertices
-
-    // initialize the semi dominator to point to the parent node
+    // Initialize the semi dominator to point to the parent node
     WInfo.Semi = WInfo.Parent;
     for (const auto &N : inverse_children<NodeT>(W))
       if (DT.Info.count(N)) { // Only if this predecessor is reachable!
@@ -206,32 +190,20 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
         if (SemiU < WInfo.Semi)
           WInfo.Semi = SemiU;
       }
-
-    // If V is a non-root vertex and sdom(V) = parent(V), then idom(V) is
-    // necessarily parent(V). In this case, set idom(V) here and avoid placing
-    // V into a bucket.
-    if (WInfo.Semi == WInfo.Parent) {
-      DT.IDoms[W] = DT.Vertex[WInfo.Parent];
-    } else {
-      Buckets[i] = Buckets[WInfo.Semi];
-      Buckets[WInfo.Semi] = i;
-    }
   }
 
-  if (N >= 1) {
-    typename GraphT::NodeRef Root = DT.Vertex[1];
-    for (unsigned j = 1; Buckets[j] != 1; j = Buckets[j]) {
-      typename GraphT::NodeRef V = DT.Vertex[Buckets[j]];
-      DT.IDoms[V] = Root;
-    }
-  }
 
-  // Step #4: Explicitly define the immediate dominator of each vertex
+  // Step #4: Explicitly define the immediate dominator of each vertex.
+  //          IDom[i] = NCA(SDom[i], SpanningTreeParent(i)).
   for (unsigned i = 2; i <= N; ++i) {
-    typename GraphT::NodeRef W = DT.Vertex[i];
-    typename GraphT::NodeRef &WIDom = DT.IDoms[W];
-    if (WIDom != DT.Vertex[DT.Info[W].Semi])
-      WIDom = DT.IDoms[WIDom];
+    const NodePtr W = DT.Vertex[i];
+    const auto& WInfo = DT.Info[W];
+    const unsigned SDomNum = DT.Info[DT.Vertex[WInfo.Semi]].DFSNum;
+    NodePtr WIDomCandidte = DT.IDoms[W];
+    while (DT.Info[WIDomCandidte].DFSNum > SDomNum)
+      WIDomCandidte = DT.IDoms[WIDomCandidte];
+
+    DT.IDoms[W] = WIDomCandidte;
   }
 
   if (DT.Roots.empty()) return;
@@ -240,7 +212,7 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
   // one exit block, or it may be the virtual exit (denoted by (BasicBlock *)0)
   // which postdominates all real exits if there are multiple exit blocks, or
   // an infinite loop.
-  typename GraphT::NodeRef Root = !MultipleRoots ? DT.Roots[0] : nullptr;
+  NodePtr Root = !MultipleRoots ? DT.Roots[0] : nullptr;
 
   DT.RootNode =
       (DT.DomTreeNodes[Root] =
@@ -249,13 +221,13 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
 
   // Loop over all of the reachable blocks in the function...
   for (unsigned i = 2; i <= N; ++i) {
-    typename GraphT::NodeRef W = DT.Vertex[i];
+    NodePtr W = DT.Vertex[i];
 
     // Don't replace this with 'count', the insertion side effect is important
     if (DT.DomTreeNodes[W])
       continue; // Haven't calculated this node yet?
 
-    typename GraphT::NodeRef ImmDom = DT.getIDom(W);
+    NodePtr ImmDom = DT.getIDom(W);
 
     assert(ImmDom || DT.DomTreeNodes[nullptr]);
 
