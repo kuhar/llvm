@@ -726,8 +726,6 @@ public:
     if (!ThisRoot)
       return;
 
-    unsigned NextDFSNum = 0;
-
     // Since we are walking a tree and visiting each node exactly twice, we only
     // need to remember if a node were encountered (true) or not (false).
     using PairTy = PointerIntPair<NodePtr, 1, bool>;
@@ -737,7 +735,8 @@ public:
     // node. Otherwise bbs, that are not post dominated by any exit but by the
     // virtual root node, will never be assigned a DFS number.
     SmallVector<PairTy, 64> WorkStack = {{ThisRoot, false}};
-
+    unsigned NextDFSNum = 0;
+    
     while (!WorkStack.empty()) {
       PairTy &CurrentElem = WorkStack.back();
       const NodePtr CurrentNode = CurrentElem.getPointer();
