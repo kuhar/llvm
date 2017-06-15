@@ -209,8 +209,7 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);
 ///
 /// This class is a generic template over graph nodes. It is instantiated for
 /// various graphs in the LLVM IR or in the code generator.
-template <class NodeT>
-class DominatorTreeBase : public DominatorBase<NodeT> {
+template <class NodeT> class DominatorTreeBase : public DominatorBase<NodeT> {
   bool dominatedBySlowTreeWalk(const DomTreeNodeBase<NodeT> *A,
                                const DomTreeNodeBase<NodeT> *B) const {
     assert(A != B);
