@@ -100,8 +100,13 @@ template <class NodeT> class DomTreeNodeBase {
   NodeT *TheBB;
   DomTreeNodeBase *IDom;
   std::vector<DomTreeNodeBase *> Children;
+<<<<<<< HEAD
   mutable unsigned DFSNumIn = ~0;
   mutable unsigned DFSNumOut = ~0;
+=======
+  mutable unsigned DFSNumIn = static_cast<unsigned>(-1);
+  mutable unsigned DFSNumOut = static_cast<unsigned>(-1);
+>>>>>>> edd401cabf6e383572f2750e545ab285f73431d2
 
  public:
   DomTreeNodeBase(NodeT *BB, DomTreeNodeBase *iDom) : TheBB(BB), IDom(iDom) {}
