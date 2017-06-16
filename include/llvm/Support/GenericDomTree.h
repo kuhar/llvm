@@ -722,39 +722,42 @@ public:
       return;
     }
 
-    using NodePtr = const DomTreeNodeBase<NodeT> *;
-    const NodePtr ThisRoot = getRootNode();
+    unsigned DFSNum = 0;
+
+    SmallVector<std::pair<const DomTreeNodeBase<NodeT> *,
+        typename DomTreeNodeBase<NodeT>::const_iterator>,
+        32> WorkStack;
+
+    const DomTreeNodeBase<NodeT> *ThisRoot = getRootNode();
+
     if (!ThisRoot)
       return;
-
-    // Since we are walking a tree and visiting each node exactly twice, we only
-    // need to remember if a node were encountered (true) or not (false).
-    using PairTy = PointerIntPair<NodePtr, 1, bool>;
 
     // Even in the case of multiple exits that form the post dominator root
     // nodes, do not iterate over all exits, but start from the virtual root
     // node. Otherwise bbs, that are not post dominated by any exit but by the
     // virtual root node, will never be assigned a DFS number.
-    SmallVector<PairTy, 64> WorkStack = {{ThisRoot, false}};
-    unsigned NextDFSNum = 0;
-    
+    WorkStack.push_back(std::make_pair(ThisRoot, ThisRoot->begin()));
+    ThisRoot->DFSNumIn = DFSNum++;
+
     while (!WorkStack.empty()) {
-      PairTy &CurrentElem = WorkStack.back();
-      const NodePtr CurrentNode = CurrentElem.getPointer();
+      const DomTreeNodeBase<NodeT> *Node = WorkStack.back().first;
+      typename DomTreeNodeBase<NodeT>::const_iterator ChildIt =
+          WorkStack.back().second;
 
-      // Assign Out number if the node was visited.
-      if (CurrentElem.getInt()) {
+      // If we visited all of the children of this node, "recurse" back up the
+      // stack setting the DFOutNum.
+      if (ChildIt == Node->end()) {
+        Node->DFSNumOut = DFSNum++;
         WorkStack.pop_back();
-        CurrentNode->DFSNumOut = NextDFSNum++;
-        continue;
-      }
+      } else {
+        // Otherwise, recursively visit this child.
+        const DomTreeNodeBase<NodeT> *Child = *ChildIt;
+        ++WorkStack.back().second;
 
-      // Visit node the first time, assign In number and add its children to the
-      // stack. Don't pop the node from the stack to visit it again.
-      CurrentNode->DFSNumIn = NextDFSNum++;
-      CurrentElem.setInt(true);
-      for (NodePtr Child : reverse(*CurrentNode))
-        WorkStack.push_back({Child, false});
+        WorkStack.push_back(std::make_pair(Child, Child->begin()));
+        Child->DFSNumIn = DFSNum++;
+      }
     }
 
     SlowQueries = 0;
