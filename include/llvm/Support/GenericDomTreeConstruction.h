@@ -255,8 +255,6 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
   // Free temporary memory used to construct idom's
   DT.IDoms.clear();
   DT.Info.clear();
-
-  DT.updateDFSNumbers();
 }
 }
 
