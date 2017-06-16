@@ -722,42 +722,29 @@ public:
       return;
     }
 
-    unsigned DFSNum = 0;
-
-    SmallVector<std::pair<const DomTreeNodeBase<NodeT> *,
-                          typename DomTreeNodeBase<NodeT>::const_iterator>,
-                32> WorkStack;
-
-    const DomTreeNodeBase<NodeT> *ThisRoot = getRootNode();
-
+    using NodePtr = const DomTreeNodeBase<NodeT> *;
+    const NodePtr ThisRoot = getRootNode();
     if (!ThisRoot)
       return;
 
-    // Even in the case of multiple exits that form the post dominator root
-    // nodes, do not iterate over all exits, but start from the virtual root
-    // node. Otherwise bbs, that are not post dominated by any exit but by the
-    // virtual root node, will never be assigned a DFS number.
-    WorkStack.push_back(std::make_pair(ThisRoot, ThisRoot->begin()));
-    ThisRoot->DFSNumIn = DFSNum++;
+    unsigned NextDFSNum = 0;
+    using PairTy = PointerIntPair<NodePtr, 1, bool>;
+    SmallVector<PairTy, 64> WorkStack = {{ThisRoot, false}};
 
     while (!WorkStack.empty()) {
-      const DomTreeNodeBase<NodeT> *Node = WorkStack.back().first;
-      typename DomTreeNodeBase<NodeT>::const_iterator ChildIt =
-          WorkStack.back().second;
+      PairTy &CurrentElem = WorkStack.back();
+      const NodePtr CurrentNode = CurrentElem.getPointer();
 
-      // If we visited all of the children of this node, "recurse" back up the
-      // stack setting the DFOutNum.
-      if (ChildIt == Node->end()) {
-        Node->DFSNumOut = DFSNum++;
+      if (CurrentElem.getInt()) {
         WorkStack.pop_back();
-      } else {
-        // Otherwise, recursively visit this child.
-        const DomTreeNodeBase<NodeT> *Child = *ChildIt;
-        ++WorkStack.back().second;
-
-        WorkStack.push_back(std::make_pair(Child, Child->begin()));
-        Child->DFSNumIn = DFSNum++;
+        CurrentNode->DFSNumOut = NextDFSNum++;
+        continue;
       }
+
+      CurrentNode->DFSNumIn = NextDFSNum++;
+      CurrentElem.setInt(true);
+      for (NodePtr Child: reverse(*CurrentNode))
+        WorkStack.push_back({Child, false});
     }
 
     SlowQueries = 0;
