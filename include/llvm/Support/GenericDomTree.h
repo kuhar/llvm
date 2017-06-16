@@ -100,8 +100,13 @@ template <class NodeT> class DomTreeNodeBase {
   NodeT *TheBB;
   DomTreeNodeBase *IDom;
   std::vector<DomTreeNodeBase *> Children;
+<<<<<<< HEAD
   mutable unsigned DFSNumIn = ~0;
   mutable unsigned DFSNumOut = ~0;
+=======
+  mutable unsigned DFSNumIn = static_cast<unsigned>(-1);
+  mutable unsigned DFSNumOut = static_cast<unsigned>(-1);
+>>>>>>> edd401cabf6e383572f2750e545ab285f73431d2
 
  public:
   DomTreeNodeBase(NodeT *BB, DomTreeNodeBase *iDom) : TheBB(BB), IDom(iDom) {}
@@ -209,7 +214,8 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);
 ///
 /// This class is a generic template over graph nodes. It is instantiated for
 /// various graphs in the LLVM IR or in the code generator.
-template <class NodeT> class DominatorTreeBase : public DominatorBase<NodeT> {
+template <class NodeT>
+class DominatorTreeBase : public DominatorBase<NodeT> {
   bool dominatedBySlowTreeWalk(const DomTreeNodeBase<NodeT> *A,
                                const DomTreeNodeBase<NodeT> *B) const {
     assert(A != B);
