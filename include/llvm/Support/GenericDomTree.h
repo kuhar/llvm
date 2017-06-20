@@ -205,6 +205,9 @@ void PrintDomTree(const DomTreeNodeBase<NodeT> *N, raw_ostream &O,
 template <class FuncT, class N>
 void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);
 
+template <class N>
+bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT);
+
 /// \brief Core dominator tree base class.
 ///
 /// This class is a generic template over graph nodes. It is instantiated for
@@ -255,10 +258,10 @@ protected:
   DenseMap<NodeT *, NodeT *> IDoms;
 
   // Vertex - Map the DFS number to the NodeT*
-  std::vector<NodeT *> Vertex;
+  mutable std::vector<NodeT *> Vertex;
 
   // Info - Collection of information used during the computation of idoms.
-  DenseMap<NodeT *, InfoRec> Info;
+  mutable DenseMap<NodeT *, InfoRec> Info;
 
   void reset() {
     DomTreeNodes.clear();
@@ -329,6 +332,7 @@ protected:
   }
 
 public:
+  using NodePtr = DomTreeNodeBase<NodeT> *;
   explicit DominatorTreeBase(bool isPostDom)
       : DominatorBase<NodeT>(isPostDom) {}
 
@@ -680,16 +684,25 @@ protected:
        unsigned LastLinked);
 
   template <class GraphT>
-  friend unsigned ReverseDFSPass(DominatorTreeBaseByGraphTraits<GraphT> &DT,
+  friend unsigned ReverseDFSPass(const DominatorTreeBaseByGraphTraits<GraphT> &DT,
                                  typename GraphT::NodeRef V, unsigned N);
 
   template <class GraphT>
-  friend unsigned DFSPass(DominatorTreeBaseByGraphTraits<GraphT> &DT,
+  friend unsigned DFSPass(const DominatorTreeBaseByGraphTraits<GraphT> &DT,
                           typename GraphT::NodeRef V, unsigned N);
 
   template <class FuncT, class N>
   friend void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
                         FuncT &F);
+
+  template <class GraphT>
+  friend bool VerifyParentProperty(const DominatorTreeBaseByGraphTraits<GraphT> &DT);
+
+  template <class GraphT>
+  friend bool VerifySiblingProperty(const DominatorTreeBaseByGraphTraits<GraphT> &DT);
+
+  template <class N>
+  friend bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT);
 
   DomTreeNodeBase<NodeT> *getNodeForBlock(NodeT *BB) {
     if (DomTreeNodeBase<NodeT> *Node = getNode(BB))
@@ -763,6 +776,12 @@ public:
     DFSInfoValid = true;
   }
 
+  /// verify - checks parent and sibling property
+  bool verify() const {
+    return this->isPostDominator() ? Verify<Inverse<NodeT *>>(*this)
+                                   : Verify<NodeT *>(*this);
+  }
+
   /// recalculate - compute a dominator tree for the given function
   template <class FT> void recalculate(FT &F) {
     using TraitsTy = GraphTraits<FT *>;
@@ -775,6 +794,7 @@ public:
       addRoot(entry);
 
       Calculate<FT, NodeT *>(*this, F);
+      Verify<NodeT *>(*this);
     } else {
       // Initialize the roots list
       for (auto *Node : nodes(&F))
@@ -782,6 +802,7 @@ public:
           addRoot(Node);
 
       Calculate<FT, Inverse<NodeT *>>(*this, F);
+      Verify<Inverse<NodeT *>>(*this);
     }
   }
 };

@@ -42,6 +42,11 @@ extern template void Calculate<Function, Inverse<BasicBlock *>>(
     DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>> &DT,
     Function &F);
 
+extern template bool Verify<BasicBlock *>(
+    const DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>> &DT);
+extern template bool Verify<Inverse<BasicBlock *>>(
+    const DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>> &DT);
+
 using DomTreeNode = DomTreeNodeBase<BasicBlock>;
 
 class BasicBlockEdge {

@@ -31,7 +31,7 @@ using namespace llvm;
 #ifdef EXPENSIVE_CHECKS
 bool llvm::VerifyDomInfo = true;
 #else
-bool llvm::VerifyDomInfo = false;
+bool llvm::VerifyDomInfo = true;
 #endif
 static cl::opt<bool,true>
 VerifyDomInfoX("verify-dom-info", cl::location(VerifyDomInfo),
@@ -72,6 +72,14 @@ template void llvm::Calculate<Function, Inverse<BasicBlock *>>(
     DominatorTreeBase<typename std::remove_pointer<
         GraphTraits<Inverse<BasicBlock *>>::NodeRef>::type> &DT,
     Function &F);
+
+template bool llvm::Verify<BasicBlock *>(
+    const DominatorTreeBase<
+        typename std::remove_pointer<GraphTraits<BasicBlock *>::NodeRef>::type>
+    &DT);
+template bool llvm::Verify<Inverse<BasicBlock *>>(
+    const DominatorTreeBase<typename std::remove_pointer<
+        GraphTraits<Inverse<BasicBlock *>>::NodeRef>::type> &DT);
 
 bool DominatorTree::invalidate(Function &F, const PreservedAnalyses &PA,
                                FunctionAnalysisManager::Invalidator &) {
@@ -285,6 +293,9 @@ bool DominatorTree::isReachableFromEntry(const Use &U) const {
 }
 
 void DominatorTree::verifyDomTree() const {
+  if (!verify())
+    abort();
+
   Function &F = *getRoot()->getParent();
 
   DominatorTree OtherDT;

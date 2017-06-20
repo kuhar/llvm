@@ -27,6 +27,7 @@
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/GenericDomTree.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
 
@@ -49,7 +50,7 @@ private:
 };
 
 template <class GraphT>
-unsigned ReverseDFSPass(DominatorTreeBaseByGraphTraits<GraphT> &DT,
+unsigned ReverseDFSPass(const DominatorTreeBaseByGraphTraits<GraphT> &DT,
                         typename GraphT::NodeRef V, unsigned N) {
   df_iterator_dom_storage<
       typename GraphT::NodeRef,
@@ -76,7 +77,7 @@ unsigned ReverseDFSPass(DominatorTreeBaseByGraphTraits<GraphT> &DT,
   return N;
 }
 template <class GraphT>
-unsigned DFSPass(DominatorTreeBaseByGraphTraits<GraphT> &DT,
+unsigned DFSPass(const DominatorTreeBaseByGraphTraits<GraphT> &DT,
                  typename GraphT::NodeRef V, unsigned N) {
   df_iterator_dom_storage<
       typename GraphT::NodeRef,
@@ -279,6 +280,97 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
 
   DT.updateDFSNumbers();
 }
+
+template <class GraphT>
+bool VerifyParentProperty(const DominatorTreeBaseByGraphTraits<GraphT> &DT) {
+  using BlockPtr = typename GraphT::NodeRef;
+  using NodePtr =
+                DomTreeNodeBase<typename std::remove_pointer<BlockPtr>::type> *;
+  for (auto &NodeToTN : DT.DomTreeNodes) {
+    const NodePtr TN = NodeToTN.second.get();
+    const BlockPtr BB = TN->getBlock();
+    if (!BB || TN->getChildren().empty())
+      continue;
+
+    DT.Info.clear();
+    DT.Info.insert({BB, {}});
+    unsigned Num = 0;
+    for (auto *Root : DT.Roots)
+      if (!DT.isPostDominator())
+        Num = DFSPass<GraphT>(DT, Root, Num);
+    else
+        Num = ReverseDFSPass<GraphT>(DT, Root, Num);
+
+    for (NodePtr Child : TN->getChildren())
+      if (DT.Info.count(Child->getBlock()) != 0) {
+        errs() << "Child " << Child->getBlock()->getName()
+               << " reachable after its parent " << BB->getName()
+               << " is removed!\n";
+        errs().flush();
+        DT.Info.clear();
+        return false;
+      }
+  }
+
+  DT.Info.clear();
+  return true;
+}
+
+template <class GraphT>
+bool VerifySiblingProperty(const DominatorTreeBaseByGraphTraits<GraphT> &DT) {
+  using BlockPtr = typename GraphT::NodeRef;
+  using NodePtr =
+  DomTreeNodeBase<typename std::remove_pointer<BlockPtr>::type> *;
+
+  for (auto &NodeToTN : DT.DomTreeNodes) {
+    const NodePtr TN = NodeToTN.second.get();
+    const BlockPtr BB = TN->getBlock();
+    if (!BB || TN->getChildren().empty())
+      continue;
+
+    const auto& Siblings = TN->getChildren();
+    for (const NodePtr N : Siblings) {
+      for (const NodePtr S : Siblings) {
+        if (S == N)
+          continue;
+
+        DT.Info.clear();
+        DT.Info.insert({S->getBlock(), {}});
+
+        unsigned Num = 0;
+        for (auto *Root : DT.Roots)
+          if (!DT.isPostDominator())
+            Num = DFSPass<GraphT>(DT, Root, Num);
+          else
+            Num = ReverseDFSPass<GraphT>(DT, Root, Num);
+
+        if (DT.Info.count(N->getBlock()) == 0) {
+          errs() << "Node " << N->getBlock()->getName() << " not reachable "
+                 << "when its sibling " << S->getBlock()->getName()
+                 << " is removed!\n";
+          errs().flush();
+          DT.Info.clear();
+          return false;
+        }
+      }
+    }
+  }
+
+  DT.Info.clear();
+  return true;
+}
+
+template <class NodeT>
+bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT) {
+  bool Correct = VerifyParentProperty<GraphTraits<NodeT>>(DT) &&
+                 VerifySiblingProperty<GraphTraits<NodeT>>(DT);
+  if (Correct)
+    return true;
+
+  errs() << "\n~~~~~~~~~~~~~~~~~~\n\t\tIncorrect DomTree!\n~~~~~~~~~~~~~~~~\n";
+  return false;
+}
+
 }
 
 #endif
