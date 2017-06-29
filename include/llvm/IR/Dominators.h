@@ -37,19 +37,25 @@ extern template class DomTreeNodeBase<BasicBlock>;
 extern template class DominatorTreeBase<BasicBlock>;
 
 namespace DomTreeBuilder {
-extern template void Calculate<Function, BasicBlock *>(
-    DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>> &DT, Function &F);
+using BBDomTree = DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>>;
+using InvBBDomTree =
+    DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>>;
+using BBNodeRef = GraphTraits<BasicBlock *>::NodeRef;
+using InvBBNodeRef = GraphTraits<Inverse<BasicBlock *>>::NodeRef;
 
+extern template void Calculate<Function, BasicBlock *>(BBDomTree &DT,
+                                                       Function &F);
 extern template void Calculate<Function, Inverse<BasicBlock *>>(
-    DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>> &DT,
-    Function &F);
+    InvBBDomTree &DT, Function &F);
 
-extern template bool Verify<BasicBlock *>(
-    const DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>> &DT);
+extern template void InsertEdge<BasicBlock *>(BBDomTree &DT, BBNodeRef From,
+                                              BBNodeRef To);
+extern template void InsertEdge<Inverse<BasicBlock *>>(InvBBDomTree &DT,
+                                                       InvBBNodeRef From,
+                                                       InvBBNodeRef To);
 
-extern template bool Verify<Inverse<BasicBlock *>>(
-    const DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>>
-        &DT);
+extern template bool Verify<BasicBlock *>(const BBDomTree &DT);
+extern template bool Verify<Inverse<BasicBlock *>>(const InvBBDomTree &DT);
 }  // namespace DomTreeBuilder
 
 using DomTreeNode = DomTreeNodeBase<BasicBlock>;

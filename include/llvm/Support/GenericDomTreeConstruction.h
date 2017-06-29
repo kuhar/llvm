@@ -178,25 +178,17 @@ struct SemiNCAInfo {
   }
 
   template <typename NodeType>
-  void runSemiNCA(DomTreeT &DT, unsigned NumBlocks) {
-    // Step #1: Number blocks in depth-first order and initialize variables used
-    // in later stages of the algorithm.
-    const unsigned N = doFullDFSWalk(DT, AlwaysDescend);
-
-    // It might be that some blocks did not get a DFS number (e.g., blocks of
-    // infinite loops). In these cases an artificial exit node is required.
-    const bool MultipleRoots =
-        DT.Roots.size() > 1 || (DT.isPostDominator() && N != NumBlocks);
-
+  void runSemiNCA(DomTreeT &DT, const bool MultipleRoots,
+                  const unsigned LastDFSNum) {
     // Initialize IDoms to spanning tree parents.
-    for (unsigned i = 1; i <= N; ++i) {
+    for (unsigned i = 1; i <= LastDFSNum; ++i) {
       const NodePtr V = NumToNode[i];
       auto &VInfo = NodeToInfo[V];
       VInfo.IDom = NumToNode[VInfo.Parent];
     }
 
-    // Step #2: Calculate the semidominators of all vertices.
-    for (unsigned i = N; i >= 2; --i) {
+    // Step #1: Calculate the semidominators of all vertices.
+    for (unsigned i = LastDFSNum; i >= 2; --i) {
       NodePtr W = NumToNode[i];
       auto &WInfo = NodeToInfo[W];
 
@@ -210,11 +202,11 @@ struct SemiNCAInfo {
         }
     }
 
-    // Step #3: Explicitly define the immediate dominator of each vertex.
+    // Step #2: Explicitly define the immediate dominator of each vertex.
     //          IDom[i] = NCA(SDom[i], SpanningTreeParent(i)).
     // Note that the parents were stored in IDoms and later got invalidated
     // during path compression in Eval.
-    for (unsigned i = 2; i <= N; ++i) {
+    for (unsigned i = 2; i <= LastDFSNum; ++i) {
       const NodePtr W = NumToNode[i];
       auto &WInfo = NodeToInfo[W];
       const unsigned SDomNum = NodeToInfo[NumToNode[WInfo.Semi]].DFSNum;
@@ -239,7 +231,7 @@ struct SemiNCAInfo {
             .get();
 
     // Loop over all of the reachable blocks in the function...
-    for (unsigned i = 2; i <= N; ++i) {
+    for (unsigned i = 2; i <= LastDFSNum; ++i) {
       NodePtr W = NumToNode[i];
 
       // Don't replace this with 'count', the insertion side effect is important
@@ -281,6 +273,20 @@ struct SemiNCAInfo {
     }
 
     return Num;
+  }
+
+  template <typename NodeType>
+  void calculateFromScratch(DomTreeT &DT, const unsigned NumBlocks) {
+    // Step #0: Number blocks in depth-first order and initialize variables used
+    // in later stages of the algorithm.
+    const unsigned LastDFSNum = doFullDFSWalk(DT, AlwaysDescend);
+
+    // It might be that some blocks did not get a DFS number (e.g., blocks of
+    // infinite loops). In these cases an artificial exit node is required.
+    const bool MultipleRoots = DT.Roots.size() > 1 ||
+        (DT.isPostDominator() && LastDFSNum != NumBlocks);
+
+    runSemiNCA<NodeT>(DT, MultipleRoots, LastDFSNum);
   }
 
   static void PrintBlockOrNullptr(raw_ostream &O, NodePtr Obj) {
@@ -500,8 +506,18 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
   using NodePtr = typename GraphTraits<NodeT>::NodeRef;
   static_assert(std::is_pointer<NodePtr>::value,
                 "NodePtr should be a pointer type");
+
   SemiNCAInfo<typename std::remove_pointer<NodePtr>::type> SNCA;
-  SNCA.template runSemiNCA<NodeT>(DT, GraphTraits<FuncT *>::size(&F));
+  SNCA.template calculateFromScratch<NodeT>(DT, GraphTraits<FuncT *>::size(&F));
+}
+
+template <class NodeT>
+void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
+                typename GraphTraits<NodeT>::NodeRef From,
+                typename GraphTraits<NodeT>::NodeRef To) {
+  using NodePtr = decltype(From);
+  static_assert(std::is_pointer<NodePtr>::value,
+                "NodePtr should be a pointer type");
 }
 
 template <class NodeT>

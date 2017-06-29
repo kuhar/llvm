@@ -64,21 +64,24 @@ template class llvm::DomTreeNodeBase<BasicBlock>;
 template class llvm::DominatorTreeBase<BasicBlock>;
 
 template void llvm::DomTreeBuilder::Calculate<Function, BasicBlock *>(
-    DominatorTreeBase<
-        typename std::remove_pointer<GraphTraits<BasicBlock *>::NodeRef>::type>
-        &DT,
-    Function &F);
+    DomTreeBuilder::BBDomTree &DT, Function &F);
+
 template void llvm::DomTreeBuilder::Calculate<Function, Inverse<BasicBlock *>>(
-    DominatorTreeBase<typename std::remove_pointer<
-        GraphTraits<Inverse<BasicBlock *>>::NodeRef>::type> &DT,
-    Function &F);
+    DomTreeBuilder::InvBBDomTree &DT, Function &F);
+
+template void llvm::DomTreeBuilder::InsertEdge<BasicBlock *>(
+    DomTreeBuilder::BBDomTree &DT, DomTreeBuilder::BBNodeRef From,
+    DomTreeBuilder::BBNodeRef To);
+
+template void llvm::DomTreeBuilder::InsertEdge<Inverse<BasicBlock *>>(
+    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::InvBBNodeRef From,
+    DomTreeBuilder::InvBBNodeRef To);
+
 template bool llvm::DomTreeBuilder::Verify<BasicBlock *>(
-    const DominatorTreeBase<
-        typename std::remove_pointer<GraphTraits<BasicBlock *>::NodeRef>::type>
-        &DT);
+    const DomTreeBuilder::BBDomTree &DT);
+
 template bool llvm::DomTreeBuilder::Verify<Inverse<BasicBlock *>>(
-    const DominatorTreeBase<typename std::remove_pointer<
-        GraphTraits<Inverse<BasicBlock *>>::NodeRef>::type> &DT);
+    const DomTreeBuilder::InvBBDomTree &DT);
 
 bool DominatorTree::invalidate(Function &F, const PreservedAnalyses &PA,
                                FunctionAnalysisManager::Invalidator &) {

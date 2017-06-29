@@ -195,11 +195,15 @@ namespace DomTreeBuilder {
 template <class NodeT>
 struct SemiNCAInfo;
 
-// The calculate routine is provided in a separate header but referenced here.
+// The functions below are provided in a separate header but referenced here.
 template <class FuncT, class N>
 void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);
 
-// The verify function is provided in a separate header but referenced here.
+template <class N>
+void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
+                typename GraphTraits<N>::NodeRef From,
+                typename GraphTraits<N>::NodeRef To);
+
 template <class N>
 bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT);
 }  // namespace DomTreeBuilder
@@ -446,6 +450,13 @@ template <class NodeT> class DominatorTreeBase {
   //===--------------------------------------------------------------------===//
   // API to update (Post)DominatorTree information based on modifications to
   // the CFG...
+
+  void insertEdge(NodeT *From, NodeT *To) {
+    if (isPostDominator())
+      DomTreeBuilder::InsertEdge<Inverse<NodeT *>>(*this, From, To);
+    else
+      DomTreeBuilder::InsertEdge<NodeT *>(*this, From, To);
+  }
 
   /// Add a new node to the dominator tree information.
   ///
