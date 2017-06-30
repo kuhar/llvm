@@ -276,21 +276,34 @@ TEST(DominatorTree, Unreachable) {
 }
 
 TEST(DominatorTree, NonUniqueEdges) {
-  CFGHolder H("m", "f");
-  std::vector<CFGBuilder::Arc> Arcs = {{"bb0", "bb2"}, {"bb0", "bb1"}};
-  CFGBuilder B(H.F, Arcs, {});
+  StringRef ModuleString =
+      "define i32 @f(i32 %i, i32 *%p) {\n"
+          "bb0:\n"
+          "   store i32 %i, i32 *%p\n"
+          "   switch i32 %i, label %bb2 [\n"
+          "     i32 0, label %bb1\n"
+          "     i32 1, label %bb1\n"
+          "   ]\n"
+          " bb1:\n"
+          "   ret i32 1\n"
+          " bb2:\n"
+          "   ret i32 4\n"
+          "}\n";
 
-  BasicBlock *BB0 = B.getOrAddBlock("bb0");
-  BasicBlock *BB1 = B.getOrAddBlock("bb1");
-  BasicBlock *BB2 = B.getOrAddBlock("bb2");
-  auto *Switch = cast<SwitchInst>(BB0->getTerminator());
-  Switch->addCase(ConstantInt::get(IntegerType::get(*H.Context, 32), 1), BB1);
+  // Parse the module.
+  LLVMContext Context;
+  std::unique_ptr<Module> M = makeLLVMModule(Context, ModuleString);
 
   runWithDomTree(
-      *H.M, "f",
+      *M, "f",
       [&](Function &F, DominatorTree *DT, DominatorTreeBase<BasicBlock> *PDT) {
+        Function::iterator FI = F.begin();
 
-        const TerminatorInst *TI = Switch;
+        BasicBlock *BB0 = &*FI++;
+        BasicBlock *BB1 = &*FI++;
+        BasicBlock *BB2 = &*FI++;
+
+        const TerminatorInst *TI = BB0->getTerminator();
         assert(TI->getNumSuccessors() == 3 && "Switch has three successors");
 
         BasicBlockEdge Edge_BB0_BB2(BB0, TI->getSuccessor(0));
