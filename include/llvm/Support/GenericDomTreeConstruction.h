@@ -183,17 +183,17 @@ struct SemiNCAInfo {
   }
 
   template <typename NodeType>
-  void runSemiNCA(DomTreeT &DT, const bool MultipleRoots,
-                  const unsigned LastDFSNum) {
+  void runSemiNCA(DomTreeT &DT) {
+    const unsigned NextDFSNum(NumToNode.size());
     // Initialize IDoms to spanning tree parents.
-    for (unsigned i = 1; i <= LastDFSNum; ++i) {
+    for (unsigned i = 1; i < NextDFSNum; ++i) {
       const NodePtr V = NumToNode[i];
       auto &VInfo = NodeToInfo[V];
       VInfo.IDom = NumToNode[VInfo.Parent];
     }
 
     // Step #1: Calculate the semidominators of all vertices.
-    for (unsigned i = LastDFSNum; i >= 2; --i) {
+    for (unsigned i = NextDFSNum - 1; i >= 2; --i) {
       NodePtr W = NumToNode[i];
       auto &WInfo = NodeToInfo[W];
 
@@ -211,7 +211,7 @@ struct SemiNCAInfo {
     //          IDom[i] = NCA(SDom[i], SpanningTreeParent(i)).
     // Note that the parents were stored in IDoms and later got invalidated
     // during path compression in Eval.
-    for (unsigned i = 2; i <= LastDFSNum; ++i) {
+    for (unsigned i = 2; i < NextDFSNum; ++i) {
       const NodePtr W = NumToNode[i];
       auto &WInfo = NodeToInfo[W];
       const unsigned SDomNum = NodeToInfo[NumToNode[WInfo.Semi]].DFSNum;
@@ -220,40 +220,6 @@ struct SemiNCAInfo {
         WIDomCandidate = NodeToInfo[WIDomCandidate].IDom;
 
       WInfo.IDom = WIDomCandidate;
-    }
-
-    if (DT.Roots.empty()) return;
-
-    // Add a node for the root.  This node might be the actual root, if there is
-    // one exit block, or it may be the virtual exit (denoted by
-    // (BasicBlock *)0) which postdominates all real exits if there are multiple
-    // exit blocks, or an infinite loop.
-    NodePtr Root = !MultipleRoots ? DT.Roots[0] : nullptr;
-
-    DT.RootNode =
-        (DT.DomTreeNodes[Root] =
-             llvm::make_unique<DomTreeNodeBase<NodeT>>(Root, nullptr))
-            .get();
-
-    // Loop over all of the reachable blocks in the function...
-    for (unsigned i = 2; i <= LastDFSNum; ++i) {
-      NodePtr W = NumToNode[i];
-
-      // Don't replace this with 'count', the insertion side effect is important
-      if (DT.DomTreeNodes[W])
-        continue; // Haven't calculated this node yet?
-
-      NodePtr ImmDom = getIDom(W);
-
-      assert(ImmDom || DT.DomTreeNodes[nullptr]);
-
-      // Get or calculate the node for the immediate dominator
-      TreeNodePtr IDomNode = getNodeForBlock(ImmDom, DT);
-
-      // Add a new tree node for this BasicBlock, and link it as a child of
-      // IDomNode
-      DT.DomTreeNodes[W] = IDomNode->addChild(
-          llvm::make_unique<DomTreeNodeBase<NodeT>>(W, IDomNode));
     }
   }
 
@@ -286,12 +252,43 @@ struct SemiNCAInfo {
     // in later stages of the algorithm.
     const unsigned LastDFSNum = doFullDFSWalk(DT, AlwaysDescend);
 
+    runSemiNCA<NodeT>(DT);
+
+    if (DT.Roots.empty()) return;
+
+    // Add a node for the root.  This node might be the actual root, if there is
+    // one exit block, or it may be the virtual exit (denoted by
+    // (BasicBlock *)0) which postdominates all real exits if there are multiple
+    // exit blocks, or an infinite loop.
     // It might be that some blocks did not get a DFS number (e.g., blocks of
     // infinite loops). In these cases an artificial exit node is required.
-    const bool MultipleRoots = DT.Roots.size() > 1 ||
-        (DT.isPostDominator() && LastDFSNum != NumBlocks);
+    const bool MultipleRoots = DT.Roots.size() > 1 || (DT.isPostDominator() &&
+                                                       LastDFSNum != NumBlocks);
+    NodePtr Root = !MultipleRoots ? DT.Roots[0] : nullptr;
 
-    runSemiNCA<NodeT>(DT, MultipleRoots, LastDFSNum);
+    DT.RootNode = (DT.DomTreeNodes[Root] =
+                       llvm::make_unique<DomTreeNodeBase<NodeT>>(Root, nullptr))
+                      .get();
+
+    // Loop over all of the reachable blocks in the function...
+    for (unsigned i = 2; i <= LastDFSNum; ++i) {
+      NodePtr W = NumToNode[i];
+
+      // Don't replace this with 'count', the insertion side effect is important
+      if (DT.DomTreeNodes[W]) continue;  // Haven't calculated this node yet?
+
+      NodePtr ImmDom = getIDom(W);
+
+      assert(ImmDom || DT.DomTreeNodes[nullptr]);
+
+      // Get or calculate the node for the immediate dominator
+      TreeNodePtr IDomNode = getNodeForBlock(ImmDom, DT);
+
+      // Add a new tree node for this BasicBlock, and link it as a child of
+      // IDomNode
+      DT.DomTreeNodes[W] = IDomNode->addChild(
+          llvm::make_unique<DomTreeNodeBase<NodeT>>(W, IDomNode));
+    }
   }
 
   struct BlockPrinter {
@@ -342,7 +339,7 @@ struct SemiNCAInfo {
 
     const TreeNodePtr ToTN = DT.getNode(To);
     if (!ToTN)
-      llvm_unreachable("Not implemented");
+      InsertUnreachable(DT, FromTN, To);
     else
       InsertReachable(DT, FromTN, ToTN);
   }
@@ -369,7 +366,7 @@ struct SemiNCAInfo {
     DTB_DEBUG(dbgs() << "Marking " << BlockPrinter(To) << " as affected\n");
     II.Affected.insert(To);
     const unsigned ToLevel = To->getLevel();
-    DTB_DEBUG(dbgs() << "Putting " << BlockPrinter(To) << " into a bucket\n");
+    DTB_DEBUG(dbgs() << "Putting " << BlockPrinter(To) << " into a Bucket\n");
     II.Bucket.push({ToLevel, To});
 
     while (!II.Bucket.empty()) {
@@ -443,6 +440,74 @@ struct SemiNCAInfo {
                        << BlockPrinter(TN->getIDom()) << ") "
                        << TN->getIDom()->getLevel() << " + 1\n");
       TN->UpdateLevel();
+    }
+  }
+
+  static void ComputeUnreachableDominators(
+      DomTreeT &DT, const NodePtr Root, const TreeNodePtr Incoming,
+      SmallVectorImpl<std::pair<NodePtr, TreeNodePtr>>
+          &DiscoveredConnectingEdges) {
+    assert(!DT.getNode(Root) && "Root must not be reachable");
+
+    auto UnreachableDescender = [&DT, &DiscoveredConnectingEdges](NodePtr From,
+                                                                  NodePtr To) {
+      const TreeNodePtr ToTN = DT.getNode(To);
+      if (!ToTN) return true;
+
+      DiscoveredConnectingEdges.push_back({From, ToTN});
+      return false;
+    };
+
+    SemiNCAInfo SNCA;
+    SNCA.NumToNode.push_back(nullptr);
+    const unsigned LastDFSNum =
+        SNCA.runDFS<false>(Root, 0, UnreachableDescender, 0);
+    SNCA.runSemiNCA<NodeT>(DT);
+    // Attach the first unreachable block to Incoming.
+    SNCA.NodeToInfo[SNCA.NumToNode[1]].IDom = Incoming->getBlock();
+    // Loop over all of the discovered blocks in the function...
+    for (unsigned i = 1; i <= LastDFSNum; ++i) {
+      NodePtr W = SNCA.NumToNode[i];
+      DTB_DEBUG(dbgs() << "\tdiscovereed ureachable node " << BlockPrinter(W)
+                       << "\n");
+
+      // Don't replace this with 'count', the insertion side effect is important
+      if (DT.DomTreeNodes[W]) continue;  // Haven't calculated this node yet?
+
+      NodePtr ImmDom = SNCA.getIDom(W);
+      assert(ImmDom);
+
+      // Get or calculate the node for the immediate dominator
+      TreeNodePtr IDomNode = SNCA.getNodeForBlock(ImmDom, DT);
+
+      // Add a new tree node for this BasicBlock, and link it as a child of
+      // IDomNode
+      DT.DomTreeNodes[W] = IDomNode->addChild(
+          llvm::make_unique<DomTreeNodeBase<NodeT>>(W, IDomNode));
+    }
+
+    DTB_DEBUG(dbgs() << "After adding unreachable nodes\n");
+    DTB_DEBUG(DT.print(dbgs()));
+  }
+
+  static void InsertUnreachable(DomTreeT &DT, const TreeNodePtr From,
+                                const NodePtr To) {
+    DTB_DEBUG(dbgs() << "Inserting " << BlockPrinter(From)
+                     << " -> (unreachable) " << BlockPrinter(To) << "\n");
+
+    SmallVector<std::pair<NodePtr, TreeNodePtr>, 8> DiscoveredEdgesToReachable;
+    ComputeUnreachableDominators(DT, To, From, DiscoveredEdgesToReachable);
+
+    DTB_DEBUG(dbgs() << "Inserted " << BlockPrinter(From)
+                     << " -> (prev unreachable) " << BlockPrinter(To) << "\n");
+
+    DTB_DEBUG(DT.print(dbgs()));
+
+    for (const auto &Edge : DiscoveredEdgesToReachable) {
+      DTB_DEBUG(dbgs() << "\tInserting discovered connecting edge "
+                       << BlockPrinter(Edge.first) << " -> "
+                       << BlockPrinter(Edge.second) << "\n");
+      InsertReachable(DT, DT.getNode(Edge.first), Edge.second);
     }
   }
 

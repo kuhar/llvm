@@ -354,3 +354,89 @@ TEST(DominatorTree, InsertReachable) {
     EXPECT_TRUE(DT.verify());
   }
 }
+
+TEST(DominatorTree, InsertUnReachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {{"1", "2"},  {"2", "3"},  {"3", "4"},
+                                       {"5", "6"},  {"5", "7"},  {"3", "8"},
+                                       {"9", "10"}, {"11", "12"}};
+
+  std::vector<CFGBuilder::Update> Updates = {{Insert, {"4", "5"}},
+                                             {Insert, {"8", "9"}},
+                                             {Insert, {"10", "12"}},
+                                             {Insert, {"10", "11"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  Holder.F->dump();
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    EXPECT_EQ(LastUpdate->Action, Insert);
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    DT.insertEdge(From, To);
+    EXPECT_TRUE(DT.verify());
+  }
+}
+
+TEST(DominatorTree, InsertMixed) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"},  {"3", "4"},  {"5", "6"},   {"5", "7"},
+      {"8", "9"}, {"9", "10"}, {"8", "11"}, {"11", "12"}, {"7", "3"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Insert, {"4", "5"}},   {Insert, {"2", "5"}},   {Insert, {"10", "9"}},
+      {Insert, {"12", "10"}}, {Insert, {"12", "10"}}, {Insert, {"7", "8"}},
+      {Insert, {"7", "5"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  Holder.F->dump();
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    EXPECT_EQ(LastUpdate->Action, Insert);
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    DT.insertEdge(From, To);
+    EXPECT_TRUE(DT.verify());
+  }
+}
+
+TEST(DominatorTree, InsertPermut) {
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"},  {"3", "4"},  {"5", "6"},   {"5", "7"},
+      {"8", "9"}, {"9", "10"}, {"8", "11"}, {"11", "12"}, {"7", "3"}};
+
+  std::vector<CFGBuilder::Update> Updates = {{Insert, {"4", "5"}},
+                                             {Insert, {"2", "5"}},
+                                             {Insert, {"10", "9"}},
+                                             {Insert, {"12", "10"}}};
+
+  while (std::next_permutation(
+      Updates.begin(), Updates.end(),
+      [](const CFGBuilder::Update &A, const CFGBuilder::Update &B) {
+        return std::tie(A.Action, A.Arc.From, A.Arc.To) <
+               std::tie(B.Action, B.Arc.From, B.Arc.To);
+      })) {
+    CFGHolder Holder;
+    CFGBuilder B(Holder.F, Arcs, Updates);
+    DominatorTree DT(*Holder.F);
+    EXPECT_TRUE(DT.verify());
+    Holder.F->dump();
+    DT.print(outs());
+
+    Optional<CFGBuilder::Update> LastUpdate;
+    while ((LastUpdate = B.applyUpdate())) {
+      EXPECT_EQ(LastUpdate->Action, Insert);
+      BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+      BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+      DT.insertEdge(From, To);
+      EXPECT_TRUE(DT.verify());
+    }
+  }
+}
