@@ -355,7 +355,7 @@ TEST(DominatorTree, InsertReachable) {
   }
 }
 
-TEST(DominatorTree, InsertUnReachable) {
+TEST(DominatorTree, InsertUnreachable) {
   CFGHolder Holder;
   std::vector<CFGBuilder::Arc> Arcs = {{"1", "2"},  {"2", "3"},  {"3", "4"},
                                        {"5", "6"},  {"5", "7"},  {"3", "8"},
@@ -438,5 +438,29 @@ TEST(DominatorTree, InsertPermut) {
       DT.insertEdge(From, To);
       EXPECT_TRUE(DT.verify());
     }
+  }
+}
+
+TEST(DominatorTree, DeleteReachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"}, {"2", "4"}, {"3", "4"}, {"4", "5"},  {"5", "6"},
+      {"5", "7"}, {"7", "8"}, {"3", "8"}, {"8", "9"}, {"9", "10"}, {"10", "2"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Delete, {"2", "4"}}, {Delete, {"7", "8"}}, {Delete, {"10", "2"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  Holder.F->dump();
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    EXPECT_EQ(LastUpdate->Action, Delete);
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    DT.deleteEdge(From, To);
+    EXPECT_TRUE(DT.verify());
   }
 }

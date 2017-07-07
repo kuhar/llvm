@@ -53,6 +53,11 @@ extern template void InsertEdge<BasicBlock *>(BBDomTree &DT, BBNodeRef From,
 extern template void InsertEdge<Inverse<BasicBlock *>>(InvBBDomTree &DT,
                                                        InvBBNodeRef From,
                                                        InvBBNodeRef To);
+extern template void DeleteEdge<BasicBlock *>(BBDomTree &DT, BBNodeRef From,
+                                              BBNodeRef To);
+extern template void DeleteEdge<Inverse<BasicBlock *>>(InvBBDomTree &DT,
+                                                       InvBBNodeRef From,
+                                                       InvBBNodeRef To);
 
 extern template bool Verify<BasicBlock *>(const BBDomTree &DT);
 extern template bool Verify<Inverse<BasicBlock *>>(const InvBBDomTree &DT);

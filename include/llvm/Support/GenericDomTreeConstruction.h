@@ -183,7 +183,7 @@ struct SemiNCAInfo {
   }
 
   template <typename NodeType>
-  void runSemiNCA(DomTreeT &DT) {
+  void runSemiNCA(DomTreeT &DT, const unsigned MinLevel = 0) {
     const unsigned NextDFSNum(NumToNode.size());
     // Initialize IDoms to spanning tree parents.
     for (unsigned i = 1; i < NextDFSNum; ++i) {
@@ -199,12 +199,17 @@ struct SemiNCAInfo {
 
       // Initialize the semi dominator to point to the parent node.
       WInfo.Semi = WInfo.Parent;
-      for (const auto &N : WInfo.ReverseChildren)
-        if (NodeToInfo.count(N)) {  // Only if this predecessor is reachable!
-          unsigned SemiU = NodeToInfo[eval(N, i + 1)].Semi;
-          if (SemiU < WInfo.Semi)
-            WInfo.Semi = SemiU;
-        }
+      for (const auto &N : WInfo.ReverseChildren) {
+        if (NodeToInfo.count(N) == 0)  // Skip unreachable predecessors.
+          continue;
+
+        const TreeNodePtr TN = DT.getNode(N);
+        if (TN && TN->getLevel() < MinLevel)  // Skip too shallow predecessors.
+          continue;
+
+        unsigned SemiU = NodeToInfo[eval(N, i + 1)].Semi;
+        if (SemiU < WInfo.Semi) WInfo.Semi = SemiU;
+      }
     }
 
     // Step #2: Explicitly define the immediate dominator of each vertex.
@@ -511,6 +516,88 @@ struct SemiNCAInfo {
     }
   }
 
+  static void DeleteEdge(DomTreeT &DT, const NodePtr From, const NodePtr To) {
+    assert(From && To && "Cannot disconnect nullptrs");
+    DTB_DEBUG(dbgs() << "Deleting edge " << BlockPrinter(From) << " -> "
+                     << BlockPrinter(To) << "\n");
+    const TreeNodePtr FromTN = DT.getNode(From);
+    // Deletion in an unreachable subtree -- nothing to do.
+    if (!FromTN) return;
+
+    const TreeNodePtr ToTN = DT.getNode(To);
+    const NodePtr NCDBlock = DT.findNearestCommonDominator(From, To);
+    const TreeNodePtr NCD = NCDBlock ? DT.getNode(NCDBlock) : nullptr;
+
+    // To dominates From -- nothing to do.
+    if (ToTN == NCD) return;
+
+    const TreeNodePtr ToIDom = ToTN->getIDom();
+    DTB_DEBUG(dbgs() << "\tNCD" << BlockPrinter(NCD) << ", ToIDom "
+                     << BlockPrinter(ToIDom) << "\n");
+
+    if (FromTN != ToIDom || IsReachableFromIDom(DT, ToTN))
+      DeleteReachable(DT, FromTN, ToTN);
+    else
+      llvm_unreachable("Delete unreachable not implemented");
+  }
+
+  static bool IsReachableFromIDom(DomTreeT &DT, const TreeNodePtr TN) {
+    DTB_DEBUG(dbgs() << "IsReachableFromIDom " << BlockPrinter(TN) << "\n");
+    for (const NodePtr Succ :
+         ChildrenGetter<NodePtr, true>::Get(TN->getBlock())) {
+      DTB_DEBUG(dbgs() << "\tSucc " << BlockPrinter(Succ) << "\n");
+      if (!DT.getNode(Succ)) continue;
+
+      const NodePtr Support =
+          DT.findNearestCommonDominator(TN->getBlock(), Succ);
+      DTB_DEBUG(dbgs() << "\tSupport " << BlockPrinter(Support) << "\n");
+      if (Support != TN->getBlock()) {
+        DTB_DEBUG(dbgs() << "\t" << BlockPrinter(TN)
+                         << " is reachable from support "
+                         << BlockPrinter(Support) << "\n");
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static void DeleteReachable(DomTreeT &DT, const TreeNodePtr FromTN,
+                              const TreeNodePtr ToTN) {
+    DTB_DEBUG(dbgs() << "Deleting reachable " << BlockPrinter(FromTN) << " -> "
+                     << BlockPrinter(ToTN) << "\n");
+    DTB_DEBUG(dbgs() << "\tRebuilding subtree\n");
+
+    const NodePtr ToIDom =
+        DT.findNearestCommonDominator(FromTN->getBlock(), ToTN->getBlock());
+    assert(ToIDom);
+    const TreeNodePtr ToIDomTN = DT.getNode(ToIDom);
+    const TreeNodePtr PrevIDomSubTree = ToIDomTN->getIDom();
+    assert(PrevIDomSubTree);
+    const unsigned Level = ToIDomTN->getLevel();
+
+    auto DescendBelow = [Level, &DT](NodePtr, NodePtr To) {
+      return DT.getNode(To)->getLevel() > Level;
+    };
+
+    DTB_DEBUG(dbgs() << "\tTop of subtree: " << BlockPrinter(ToIDomTN) << "\n");
+
+    SemiNCAInfo SNCA;
+    SNCA.NumToNode.push_back(nullptr);
+    const unsigned LastDFSNum = SNCA.runDFS<false>(ToIDom, 0, DescendBelow, 0);
+    DTB_DEBUG(dbgs() << "\tRunning Semi-NCA\n");
+    SNCA.runSemiNCA<NodeT>(DT, Level);
+
+    SNCA.NodeToInfo[ToIDom].IDom = PrevIDomSubTree->getBlock();
+    for (unsigned i = 1; i <= LastDFSNum; ++i) {
+      const NodePtr N = SNCA.NumToNode[i];
+      const TreeNodePtr TN = DT.getNode(N);
+      assert(TN);
+      const TreeNodePtr NewIDom = DT.getNode(SNCA.NodeToInfo[N].IDom);
+      TN->setIDom(NewIDom);
+    }
+  }
+
   //~~
   //===--------------- DomTree correctness verification ---------------------===
   //~~
@@ -737,8 +824,23 @@ void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
   using NodePtr = decltype(From);
   static_assert(std::is_pointer<NodePtr>::value,
                 "NodePtr should be a pointer type");
+  if (DT.isPostDominator())
+    llvm_unreachable("Insertions are not implemented for postdominators yet");
 
   SemiNCATy<NodePtr>::InsertEdge(DT, From, To);
+}
+
+template <class NodeT>
+void DeleteEdge(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
+                typename GraphTraits<NodeT>::NodeRef From,
+                typename GraphTraits<NodeT>::NodeRef To) {
+  using NodePtr = decltype(From);
+  static_assert(std::is_pointer<NodePtr>::value,
+                "NodePtr should be a pointer type");
+  if (DT.isPostDominator())
+    llvm_unreachable("Deletions are not implemented for postdominators yet");
+
+  SemiNCATy<NodePtr>::DeleteEdge(DT, From, To);
 }
 
 template <class NodeT>

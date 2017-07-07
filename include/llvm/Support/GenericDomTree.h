@@ -208,6 +208,11 @@ void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
                 typename GraphTraits<N>::NodeRef To);
 
 template <class N>
+void DeleteEdge(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
+                typename GraphTraits<N>::NodeRef From,
+                typename GraphTraits<N>::NodeRef To);
+
+template <class N>
 bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT);
 }  // namespace DomTreeBuilder
 
@@ -452,13 +457,20 @@ template <class NodeT> class DominatorTreeBase {
 
   //===--------------------------------------------------------------------===//
   // API to update (Post)DominatorTree information based on modifications to
-  // the CFG...
+  // the CFG.
 
   void insertEdge(NodeT *From, NodeT *To) {
     if (isPostDominator())
-      DomTreeBuilder::InsertEdge<Inverse<NodeT *>>(*this, From, To);
+      DomTreeBuilder::InsertEdge<Inverse<NodeT *>>(*this, To, From);
     else
       DomTreeBuilder::InsertEdge<NodeT *>(*this, From, To);
+  }
+
+  void deleteEdge(NodeT *From, NodeT *To) {
+    if (isPostDominator())
+      DomTreeBuilder::DeleteEdge<Inverse<NodeT *>>(*this, To, From);
+    else
+      DomTreeBuilder::DeleteEdge<NodeT *>(*this, From, To);
   }
 
   /// Add a new node to the dominator tree information.

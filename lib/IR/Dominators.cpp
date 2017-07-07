@@ -77,6 +77,14 @@ template void llvm::DomTreeBuilder::InsertEdge<Inverse<BasicBlock *>>(
     DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::InvBBNodeRef From,
     DomTreeBuilder::InvBBNodeRef To);
 
+template void llvm::DomTreeBuilder::DeleteEdge<BasicBlock *>(
+    DomTreeBuilder::BBDomTree &DT, DomTreeBuilder::BBNodeRef From,
+    DomTreeBuilder::BBNodeRef To);
+
+template void llvm::DomTreeBuilder::DeleteEdge<Inverse<BasicBlock *>>(
+    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::InvBBNodeRef From,
+    DomTreeBuilder::InvBBNodeRef To);
+
 template bool llvm::DomTreeBuilder::Verify<BasicBlock *>(
     const DomTreeBuilder::BBDomTree &DT);
 
