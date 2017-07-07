@@ -58,10 +58,16 @@ template <typename GT>
 using DominatorTreeBaseByGraphTraits =
     typename detail::DominatorTreeBaseTraits<GT>::type;
 
+namespace DomTreeBuilder {
+template<class NodeT>
+struct SemiNCAInfo;
+}  // namespace DomTreeBuilder
+
 /// \brief Base class for the actual dominator tree node.
 template <class NodeT> class DomTreeNodeBase {
   friend struct PostDominatorTree;
   template <class N> friend class DominatorTreeBase;
+  friend struct DomTreeBuilder::SemiNCAInfo<NodeT>;
 
   NodeT *TheBB;
   DomTreeNodeBase *IDom;
@@ -192,9 +198,6 @@ void PrintDomTree(const DomTreeNodeBase<NodeT> *N, raw_ostream &O,
 }
 
 namespace DomTreeBuilder {
-template <class NodeT>
-struct SemiNCAInfo;
-
 // The functions below are provided in a separate header but referenced here.
 template <class FuncT, class N>
 void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);

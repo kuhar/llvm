@@ -326,3 +326,31 @@ TEST(DominatorTree, NonUniqueEdges) {
         EXPECT_FALSE(DT->dominates(Edge_BB0_BB1_b, BB2));
       });
 }
+
+static const auto Insert = CFGBuilder::ActionKind::Insert;
+static const auto Delete = CFGBuilder::ActionKind::Delete;
+
+TEST(DominatorTree, InsertReachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"}, {"3", "4"}, {"4", "5"}, {"5", "6"}, {"5", "7"},
+      {"3", "8"}, {"8", "9"}, {"9", "10"}, {"8", "11"}, {"11", "12"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Insert, {"12", "10"}}, {Insert, {"10", "9"}}, {Insert, {"7", "6"}},
+      {Insert, {"7", "5"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  Holder.F->dump();
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    EXPECT_EQ(LastUpdate->Action, Insert);
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    DT.insertEdge(From, To);
+    EXPECT_TRUE(DT.verify());
+  }
+}
