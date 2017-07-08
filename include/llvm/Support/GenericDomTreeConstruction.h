@@ -67,11 +67,11 @@ struct SemiNCAInfo {
     SmallVector<NodePtr, 2> ReverseChildren;
   };
 
-  std::vector<NodePtr> NumToNode;
+  std::vector<NodePtr> NumToNode = {nullptr};
   DenseMap<NodePtr, InfoRec> NodeToInfo;
 
   void clear() {
-    NumToNode.clear();
+    NumToNode = {nullptr};
     NodeToInfo.clear();
   }
 
@@ -182,7 +182,6 @@ struct SemiNCAInfo {
     return VInInfo.Label;
   }
 
-  template <typename NodeType>
   void runSemiNCA(DomTreeT &DT, const unsigned MinLevel = 0) {
     const unsigned NextDFSNum(NumToNode.size());
     // Initialize IDoms to spanning tree parents.
@@ -231,7 +230,6 @@ struct SemiNCAInfo {
   template <typename DescendCondition>
   unsigned doFullDFSWalk(const DomTreeT &DT, DescendCondition DC) {
     unsigned Num = 0;
-    NumToNode.push_back(nullptr);
 
     if (DT.Roots.size() > 1) {
       auto &BBInfo = NodeToInfo[nullptr];
@@ -251,13 +249,12 @@ struct SemiNCAInfo {
     return Num;
   }
 
-  template <typename NodeType>
   void calculateFromScratch(DomTreeT &DT, const unsigned NumBlocks) {
     // Step #0: Number blocks in depth-first order and initialize variables used
     // in later stages of the algorithm.
     const unsigned LastDFSNum = doFullDFSWalk(DT, AlwaysDescend);
 
-    runSemiNCA<NodeT>(DT);
+    runSemiNCA(DT);
 
     if (DT.Roots.empty()) return;
 
@@ -464,10 +461,9 @@ struct SemiNCAInfo {
     };
 
     SemiNCAInfo SNCA;
-    SNCA.NumToNode.push_back(nullptr);
     const unsigned LastDFSNum =
         SNCA.runDFS<false>(Root, 0, UnreachableDescender, 0);
-    SNCA.runSemiNCA<NodeT>(DT);
+    SNCA.runSemiNCA(DT);
     // Attach the first unreachable block to Incoming.
     SNCA.NodeToInfo[SNCA.NumToNode[1]].IDom = Incoming->getBlock();
     // Loop over all of the discovered blocks in the function...
@@ -538,28 +534,7 @@ struct SemiNCAInfo {
     if (FromTN != ToIDom || IsReachableFromIDom(DT, ToTN))
       DeleteReachable(DT, FromTN, ToTN);
     else
-      llvm_unreachable("Delete unreachable not implemented");
-  }
-
-  static bool IsReachableFromIDom(DomTreeT &DT, const TreeNodePtr TN) {
-    DTB_DEBUG(dbgs() << "IsReachableFromIDom " << BlockPrinter(TN) << "\n");
-    for (const NodePtr Succ :
-         ChildrenGetter<NodePtr, true>::Get(TN->getBlock())) {
-      DTB_DEBUG(dbgs() << "\tSucc " << BlockPrinter(Succ) << "\n");
-      if (!DT.getNode(Succ)) continue;
-
-      const NodePtr Support =
-          DT.findNearestCommonDominator(TN->getBlock(), Succ);
-      DTB_DEBUG(dbgs() << "\tSupport " << BlockPrinter(Support) << "\n");
-      if (Support != TN->getBlock()) {
-        DTB_DEBUG(dbgs() << "\t" << BlockPrinter(TN)
-                         << " is reachable from support "
-                         << BlockPrinter(Support) << "\n");
-        return true;
-      }
-    }
-
-    return false;
+      DeleteUnreachable(DT, ToTN);
   }
 
   static void DeleteReachable(DomTreeT &DT, const TreeNodePtr FromTN,
@@ -583,10 +558,9 @@ struct SemiNCAInfo {
     DTB_DEBUG(dbgs() << "\tTop of subtree: " << BlockPrinter(ToIDomTN) << "\n");
 
     SemiNCAInfo SNCA;
-    SNCA.NumToNode.push_back(nullptr);
     const unsigned LastDFSNum = SNCA.runDFS<false>(ToIDom, 0, DescendBelow, 0);
     DTB_DEBUG(dbgs() << "\tRunning Semi-NCA\n");
-    SNCA.runSemiNCA<NodeT>(DT, Level);
+    SNCA.runSemiNCA(DT, Level);
 
     SNCA.NodeToInfo[ToIDom].IDom = PrevIDomSubTree->getBlock();
     for (unsigned i = 1; i <= LastDFSNum; ++i) {
@@ -596,6 +570,127 @@ struct SemiNCAInfo {
       const TreeNodePtr NewIDom = DT.getNode(SNCA.NodeToInfo[N].IDom);
       TN->setIDom(NewIDom);
     }
+  }
+
+  static bool IsReachableFromIDom(DomTreeT &DT, const TreeNodePtr TN) {
+    DTB_DEBUG(dbgs() << "IsReachableFromIDom " << BlockPrinter(TN) << "\n");
+    for (const NodePtr Succ :
+         ChildrenGetter<NodePtr, true>::Get(TN->getBlock())) {
+      DTB_DEBUG(dbgs() << "\tSucc " << BlockPrinter(Succ) << "\n");
+      if (!DT.getNode(Succ)) continue;
+
+      const NodePtr Support =
+          DT.findNearestCommonDominator(TN->getBlock(), Succ);
+      DTB_DEBUG(dbgs() << "\tSupport " << BlockPrinter(Support) << "\n");
+      if (Support != TN->getBlock()) {
+        DTB_DEBUG(dbgs() << "\t" << BlockPrinter(TN)
+                         << " is reachable from support "
+                         << BlockPrinter(Support) << "\n");
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static void DeleteUnreachable(DomTreeT &DT, const TreeNodePtr ToTN) {
+    DTB_DEBUG(dbgs() << "Deleting unreachable subtree " << BlockPrinter(ToTN)
+                     << "\n");
+    assert(ToTN);
+
+    SmallVector<NodePtr, 16> AffectedQueue;
+    const unsigned Level = ToTN->getLevel();
+
+    auto DescendAndCollect = [Level, &AffectedQueue, &DT](NodePtr, NodePtr To) {
+      const TreeNodePtr TN = DT.getNode(To);
+      assert(TN);
+      if (TN->getLevel() > Level) return true;
+      if (llvm::find(AffectedQueue, To) == AffectedQueue.end()) {
+        AffectedQueue.push_back(To);
+      }
+      return false;
+    };
+
+    SemiNCAInfo SNCA;
+    unsigned LastDFSNum =
+        SNCA.runDFS<false>(ToTN->getBlock(), 0, DescendAndCollect, 0);
+
+    TreeNodePtr MinNode = ToTN;
+
+    for (const NodePtr N : AffectedQueue) {
+      const TreeNodePtr TN = DT.getNode(N);
+      const NodePtr NCDBlock =
+          DT.findNearestCommonDominator(TN->getBlock(), ToTN->getBlock());
+      assert(NCDBlock);
+      const TreeNodePtr NCD = DT.getNode(NCDBlock);
+      assert(NCD);
+
+      if (NCD != TN && NCD->getLevel() < MinNode->getLevel()) MinNode = NCD;
+    }
+
+    for (unsigned i = LastDFSNum; i > 0; --i) {
+      const NodePtr N = SNCA.NumToNode[i];
+      const TreeNodePtr TN = DT.getNode(N);
+      DTB_DEBUG(dbgs() << "Erasing node " << BlockPrinter(TN) << "\n");
+
+      EraseNode(DT, TN);
+    }
+
+    if (MinNode == ToTN) return;
+
+    DTB_DEBUG(dbgs() << "DeleteUnreachable: running DFS with MinNode = "
+                     << BlockPrinter(MinNode) << "\n");
+    const unsigned MinLevel = MinNode->getLevel();
+    const TreeNodePtr PrevIDom = MinNode->getIDom();
+    assert(PrevIDom);
+
+    SNCA.clear();
+    LastDFSNum =
+        SNCA.runDFS<false>(MinNode->getBlock(), 0,
+                           [MinLevel, &DT](NodePtr, NodePtr To) {
+                             const TreeNodePtr ToTN = DT.getNode(To);
+                             return ToTN && ToTN->getLevel() > MinLevel;
+                           },
+                           0);
+
+    DTB_DEBUG(dbgs() << "\nDFSNumbering:\n");
+    for (unsigned i = 1; i < SNCA.NumToNode.size(); ++i)
+      DTB_DEBUG(
+          dbgs()
+          << BlockPrinter(SNCA.NumToNode[i]) << " {" << i << "} ("
+          << BlockPrinter(
+                 SNCA.NumToNode[SNCA.NodeToInfo[SNCA.NumToNode[i]].Parent])
+          << ")\n");
+
+    DTB_DEBUG(dbgs() << "Previous IDom(MinNode) = " << BlockPrinter(PrevIDom)
+                     << "\nRunning Semi-NCA\n");
+
+    SNCA.runSemiNCA(DT, MinLevel);
+    SNCA.NodeToInfo[MinNode->getBlock()].IDom = PrevIDom->getBlock();
+    for (unsigned i = 1; i <= LastDFSNum; ++i) {
+      const NodePtr N = SNCA.NumToNode[i];
+      const TreeNodePtr TN = DT.getNode(N);
+      assert(TN);
+      const TreeNodePtr NewIDom = DT.getNode(SNCA.NodeToInfo[N].IDom);
+      DTB_DEBUG(dbgs() << "\t" << BlockPrinter(N) << " has a new idom "
+                       << BlockPrinter(NewIDom) << "\n");
+      TN->setIDom(NewIDom);
+    }
+  }
+
+  static void EraseNode(DomTreeT &DT, const TreeNodePtr TN) {
+    assert(TN);
+    assert(TN->getNumChildren() == 0);
+
+    const TreeNodePtr IDom = TN->getIDom();
+    assert(IDom);
+
+    auto ChIt = llvm::find(IDom->Children, TN);
+    assert(ChIt != IDom->Children.end());
+    std::swap(*ChIt, IDom->Children.back());
+    IDom->Children.pop_back();
+
+    DT.DomTreeNodes.erase(TN->getBlock());
   }
 
   //~~
@@ -814,7 +909,7 @@ void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
                 "NodePtr should be a pointer type");
 
   SemiNCATy<NodePtr> SNCA;
-  SNCA.template calculateFromScratch<NodeT>(DT, GraphTraits<FuncT *>::size(&F));
+  SNCA.template calculateFromScratch(DT, GraphTraits<FuncT *>::size(&F));
 }
 
 template <class NodeT>

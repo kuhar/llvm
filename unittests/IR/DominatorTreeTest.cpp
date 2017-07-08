@@ -327,8 +327,15 @@ TEST(DominatorTree, NonUniqueEdges) {
       });
 }
 
-static const auto Insert = CFGBuilder::ActionKind::Insert;
-static const auto Delete = CFGBuilder::ActionKind::Delete;
+namespace {
+const auto Insert = CFGBuilder::ActionKind::Insert;
+const auto Delete = CFGBuilder::ActionKind::Delete;
+
+bool CompUpdates(const CFGBuilder::Update &A, const CFGBuilder::Update &B) {
+  return std::tie(A.Action, A.Arc.From, A.Arc.To) <
+         std::tie(B.Action, B.Arc.From, B.Arc.To);
+};
+}  // namespace
 
 TEST(DominatorTree, InsertReachable) {
   CFGHolder Holder;
@@ -342,7 +349,6 @@ TEST(DominatorTree, InsertReachable) {
   CFGBuilder B(Holder.F, Arcs, Updates);
   DominatorTree DT(*Holder.F);
   EXPECT_TRUE(DT.verify());
-  Holder.F->dump();
   DT.print(outs());
 
   Optional<CFGBuilder::Update> LastUpdate;
@@ -368,7 +374,6 @@ TEST(DominatorTree, InsertUnreachable) {
   CFGBuilder B(Holder.F, Arcs, Updates);
   DominatorTree DT(*Holder.F);
   EXPECT_TRUE(DT.verify());
-  Holder.F->dump();
   DT.print(outs());
 
   Optional<CFGBuilder::Update> LastUpdate;
@@ -394,7 +399,6 @@ TEST(DominatorTree, InsertMixed) {
   CFGBuilder B(Holder.F, Arcs, Updates);
   DominatorTree DT(*Holder.F);
   EXPECT_TRUE(DT.verify());
-  Holder.F->dump();
   DT.print(outs());
 
   Optional<CFGBuilder::Update> LastUpdate;
@@ -417,17 +421,11 @@ TEST(DominatorTree, InsertPermut) {
                                              {Insert, {"10", "9"}},
                                              {Insert, {"12", "10"}}};
 
-  while (std::next_permutation(
-      Updates.begin(), Updates.end(),
-      [](const CFGBuilder::Update &A, const CFGBuilder::Update &B) {
-        return std::tie(A.Action, A.Arc.From, A.Arc.To) <
-               std::tie(B.Action, B.Arc.From, B.Arc.To);
-      })) {
+  while (std::next_permutation(Updates.begin(), Updates.end(), CompUpdates)) {
     CFGHolder Holder;
     CFGBuilder B(Holder.F, Arcs, Updates);
     DominatorTree DT(*Holder.F);
     EXPECT_TRUE(DT.verify());
-    Holder.F->dump();
     DT.print(outs());
 
     Optional<CFGBuilder::Update> LastUpdate;
@@ -452,7 +450,6 @@ TEST(DominatorTree, DeleteReachable) {
   CFGBuilder B(Holder.F, Arcs, Updates);
   DominatorTree DT(*Holder.F);
   EXPECT_TRUE(DT.verify());
-  Holder.F->dump();
   DT.print(outs());
 
   Optional<CFGBuilder::Update> LastUpdate;
@@ -462,5 +459,91 @@ TEST(DominatorTree, DeleteReachable) {
     BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
     DT.deleteEdge(From, To);
     EXPECT_TRUE(DT.verify());
+  }
+}
+
+TEST(DominatorTree, DeleteUnreachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"}, {"3", "4"}, {"4", "5"},  {"5", "6"}, {"5", "7"},
+      {"7", "8"}, {"3", "8"}, {"8", "9"}, {"9", "10"}, {"10", "2"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Delete, {"8", "9"}}, {Delete, {"7", "8"}}, {Delete, {"3", "4"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    EXPECT_EQ(LastUpdate->Action, Delete);
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    DT.deleteEdge(From, To);
+    EXPECT_TRUE(DT.verify());
+  }
+}
+
+TEST(DominatorTree, InsertDelete) {
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"}, {"3", "4"},  {"4", "5"},  {"5", "6"},  {"5", "7"},
+      {"3", "8"}, {"8", "9"}, {"9", "10"}, {"8", "11"}, {"11", "12"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Insert, {"2", "4"}},  {Insert, {"12", "10"}}, {Insert, {"10", "9"}},
+      {Insert, {"7", "6"}},  {Insert, {"7", "5"}},   {Delete, {"3", "8"}},
+      {Insert, {"10", "7"}}, {Insert, {"2", "8"}},   {Delete, {"3", "4"}},
+      {Delete, {"8", "9"}},  {Delete, {"11", "12"}}};
+
+  CFGHolder Holder;
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  DominatorTree DT(*Holder.F);
+  EXPECT_TRUE(DT.verify());
+  DT.print(outs());
+
+  Optional<CFGBuilder::Update> LastUpdate;
+  while ((LastUpdate = B.applyUpdate())) {
+    BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+    BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+    if (LastUpdate->Action == Insert)
+      DT.insertEdge(From, To);
+    else
+      DT.deleteEdge(From, To);
+
+    EXPECT_TRUE(DT.verify());
+  }
+}
+
+TEST(DominatorTree, InsertDeleteExhaustive) {
+  std::vector<CFGBuilder::Arc> Arcs = {
+      {"1", "2"}, {"2", "3"}, {"3", "4"},  {"4", "5"},  {"5", "6"},  {"5", "7"},
+      {"3", "8"}, {"8", "9"}, {"9", "10"}, {"8", "11"}, {"11", "12"}};
+
+  std::vector<CFGBuilder::Update> Updates = {
+      {Insert, {"2", "4"}},  {Insert, {"12", "10"}}, {Insert, {"10", "9"}},
+      {Insert, {"7", "6"}},  {Insert, {"7", "5"}},   {Delete, {"3", "8"}},
+      {Insert, {"10", "7"}}, {Insert, {"2", "8"}},   {Delete, {"3", "4"}},
+      {Delete, {"8", "9"}},  {Delete, {"11", "12"}}};
+
+  for (unsigned i = 0; i < 16; ++i) {
+    std::shuffle(Updates.begin(), Updates.end(), std::mt19937());
+    CFGHolder Holder;
+    CFGBuilder B(Holder.F, Arcs, Updates);
+    DominatorTree DT(*Holder.F);
+    EXPECT_TRUE(DT.verify());
+    DT.print(outs());
+
+    Optional<CFGBuilder::Update> LastUpdate;
+    while ((LastUpdate = B.applyUpdate())) {
+      BasicBlock *From = B.getOrAddBlock(LastUpdate->Arc.From);
+      BasicBlock *To = B.getOrAddBlock(LastUpdate->Arc.To);
+      if (LastUpdate->Action == Insert)
+        DT.insertEdge(From, To);
+      else
+        DT.deleteEdge(From, To);
+
+      EXPECT_TRUE(DT.verify());
+    }
   }
 }
