@@ -545,8 +545,7 @@ struct SemiNCAInfo {
     const TreeNodePtr PrevIDomSubTree = ToIDomTN->getIDom();
     if (!PrevIDomSubTree) {
       DTB_DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
-      assert(ToTN->getBlock());
-      DT.recalculate(*ToTN->getBlock()->getParent());
+      DT.recalculate(*DT.Parent);
       return;
     }
 
@@ -627,9 +626,7 @@ struct SemiNCAInfo {
 
     if (!MinNode->getIDom()) {
       DTB_DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
-      auto *const Parent = ToTN->getBlock()->getParent();
-      assert(Parent);
-      DT.recalculate(*Parent);
+      DT.recalculate(*DT.Parent);
       return;
     }
 

@@ -215,6 +215,8 @@ class DominatorTreeBase {
      DenseMap<NodeT *, std::unique_ptr<DomTreeNodeBase<NodeT>>>;
   DomTreeNodeMapType DomTreeNodes;
   DomTreeNodeBase<NodeT> *RootNode;
+  using ParentPtr = decltype(std::declval<NodeT *>()->getParent());
+  ParentPtr Parent = nullptr;
 
   mutable bool DFSInfoValid = false;
   mutable unsigned int SlowQueries = 0;
@@ -233,9 +235,10 @@ class DominatorTreeBase {
   DominatorTreeBase(DominatorTreeBase &&Arg)
       : Roots(std::move(Arg.Roots)),
         DomTreeNodes(std::move(Arg.DomTreeNodes)),
-        RootNode(std::move(Arg.RootNode)),
-        DFSInfoValid(std::move(Arg.DFSInfoValid)),
-        SlowQueries(std::move(Arg.SlowQueries)) {
+        RootNode(Arg.RootNode),
+        Parent(Arg.Parent),
+        DFSInfoValid(Arg.DFSInfoValid),
+        SlowQueries(Arg.SlowQueries) {
     Arg.wipe();
   }
 
@@ -243,9 +246,10 @@ class DominatorTreeBase {
     Roots = std::move(RHS.Roots);
     assert(IsPostDom == IsPostDominators);
     DomTreeNodes = std::move(RHS.DomTreeNodes);
-    RootNode = std::move(RHS.RootNode);
-    DFSInfoValid = std::move(RHS.DFSInfoValid);
-    SlowQueries = std::move(RHS.SlowQueries);
+    RootNode = RHS.RootNode;
+    Parent = RHS.Parent;
+    DFSInfoValid = RHS.DFSInfoValid;
+    SlowQueries = RHS.SlowQueries;
     RHS.wipe();
     return *this;
   }
@@ -454,10 +458,18 @@ class DominatorTreeBase {
   // the CFG.
 
   void insertEdge(NodeT *From, NodeT *To) {
+    assert(From);
+    assert(To);
+    assert(From->getParent() == Parent);
+    assert(To->getParent() == Parent);
     DomTreeBuilder::InsertEdge(*this, From, To);
   }
 
   void deleteEdge(NodeT *From, NodeT *To) {
+    assert(From);
+    assert(To);
+    assert(From->getParent() == Parent);
+    assert(To->getParent() == Parent);
     DomTreeBuilder::DeleteEdge(*this, From, To);
   }
 
@@ -621,6 +633,7 @@ public:
   template <class FT> void recalculate(FT &F) {
     using TraitsTy = GraphTraits<FT *>;
     reset();
+    Parent = &F;
 
     if (!this->IsPostDominators) {
       // Initialize root
@@ -648,6 +661,7 @@ public:
     DomTreeNodes.clear();
     Roots.clear();
     RootNode = nullptr;
+    Parent = nullptr;
     DFSInfoValid = false;
     SlowQueries = 0;
   }
@@ -729,6 +743,7 @@ public:
   void wipe() {
     DomTreeNodes.clear();
     RootNode = nullptr;
+    Parent = nullptr;
   }
 };
 
