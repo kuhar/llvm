@@ -609,7 +609,7 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   return NearLoop;
 }
 
-LoopInfo::LoopInfo(const DominatorTreeBase<BasicBlock> &DomTree) {
+LoopInfo::LoopInfo(const DominatorTreeBase<BasicBlock, false> &DomTree) {
   analyze(DomTree);
 }
 

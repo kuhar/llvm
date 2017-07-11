@@ -52,11 +52,12 @@ struct ChildrenGetter<NodePtr, true> {
 };
 
 // Information record used by Semi-NCA during tree construction.
-template <typename NodeT>
+template <typename DomTreeT>
 struct SemiNCAInfo {
-  using NodePtr = NodeT *;
-  using DomTreeT = DominatorTreeBase<NodeT>;
+  using NodePtr = typename DomTreeT::NodePtr;
+  using NodeT = typename DomTreeT::NodeType;
   using TreeNodePtr = DomTreeNodeBase<NodeT> *;
+  static constexpr bool IsPostDom = DomTreeT::IsPostDominators;
 
   struct InfoRec {
     unsigned DFSNum = 0;
@@ -393,7 +394,7 @@ struct SemiNCAInfo {
 
     assert(TN->getBlock());
     for (const NodePtr Succ :
-                          ChildrenGetter<NodePtr, false>::Get(TN->getBlock())) {
+         ChildrenGetter<NodePtr, IsPostDom>::Get(TN->getBlock())) {
       const TreeNodePtr SuccTN = DT.getNode(Succ);
       assert(SuccTN && "Unreachable successor found at reachable insertion");
       const unsigned SuccLevel = SuccTN->getLevel();
@@ -462,7 +463,7 @@ struct SemiNCAInfo {
 
     SemiNCAInfo SNCA;
     const unsigned LastDFSNum =
-        SNCA.runDFS<false>(Root, 0, UnreachableDescender, 0);
+        SNCA.runDFS<IsPostDom>(Root, 0, UnreachableDescender, 0);
     SNCA.runSemiNCA(DT);
     // Attach the first unreachable block to Incoming.
     SNCA.NodeToInfo[SNCA.NumToNode[1]].IDom = Incoming->getBlock();
@@ -558,7 +559,8 @@ struct SemiNCAInfo {
     DTB_DEBUG(dbgs() << "\tTop of subtree: " << BlockPrinter(ToIDomTN) << "\n");
 
     SemiNCAInfo SNCA;
-    const unsigned LastDFSNum = SNCA.runDFS<false>(ToIDom, 0, DescendBelow, 0);
+    const unsigned LastDFSNum =
+        SNCA.runDFS<IsPostDom>(ToIDom, 0, DescendBelow, 0);
     DTB_DEBUG(dbgs() << "\tRunning Semi-NCA\n");
     SNCA.runSemiNCA(DT, Level);
 
@@ -575,7 +577,7 @@ struct SemiNCAInfo {
   static bool IsReachableFromIDom(DomTreeT &DT, const TreeNodePtr TN) {
     DTB_DEBUG(dbgs() << "IsReachableFromIDom " << BlockPrinter(TN) << "\n");
     for (const NodePtr Succ :
-         ChildrenGetter<NodePtr, true>::Get(TN->getBlock())) {
+         ChildrenGetter<NodePtr, !IsPostDom>::Get(TN->getBlock())) {
       DTB_DEBUG(dbgs() << "\tSucc " << BlockPrinter(Succ) << "\n");
       if (!DT.getNode(Succ)) continue;
 
@@ -898,53 +900,33 @@ struct SemiNCAInfo {
   }
 };
 
-template <typename NodePtr>
-using SemiNCATy = SemiNCAInfo<typename std::remove_pointer<NodePtr>::type>;
-
-template <class FuncT, class NodeT>
-void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
-               FuncT &F) {
-  using NodePtr = typename GraphTraits<NodeT>::NodeRef;
-  static_assert(std::is_pointer<NodePtr>::value,
-                "NodePtr should be a pointer type");
-
-  SemiNCATy<NodePtr> SNCA;
+template <class FuncT, class DomTreeT>
+void Calculate(DomTreeT &DT, FuncT &F) {
+  SemiNCAInfo<DomTreeT> SNCA;
   SNCA.template calculateFromScratch(DT, GraphTraits<FuncT *>::size(&F));
 }
 
-template <class NodeT>
-void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
-                typename GraphTraits<NodeT>::NodeRef From,
-                typename GraphTraits<NodeT>::NodeRef To) {
-  using NodePtr = decltype(From);
-  static_assert(std::is_pointer<NodePtr>::value,
-                "NodePtr should be a pointer type");
+template <class DomTreeT>
+void InsertEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
+                typename DomTreeT::NodePtr To) {
   if (DT.isPostDominator())
     llvm_unreachable("Insertions are not implemented for postdominators yet");
 
-  SemiNCATy<NodePtr>::InsertEdge(DT, From, To);
+  SemiNCAInfo<DomTreeT>::InsertEdge(DT, From, To);
 }
 
-template <class NodeT>
-void DeleteEdge(DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT,
-                typename GraphTraits<NodeT>::NodeRef From,
-                typename GraphTraits<NodeT>::NodeRef To) {
-  using NodePtr = decltype(From);
-  static_assert(std::is_pointer<NodePtr>::value,
-                "NodePtr should be a pointer type");
+template <class DomTreeT>
+void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
+                typename DomTreeT::NodePtr To) {
   if (DT.isPostDominator())
     llvm_unreachable("Deletions are not implemented for postdominators yet");
 
-  SemiNCATy<NodePtr>::DeleteEdge(DT, From, To);
+  SemiNCAInfo<DomTreeT>::DeleteEdge(DT, From, To);
 }
 
-template <class NodeT>
-bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<NodeT>> &DT) {
-  using NodePtr = typename GraphTraits<NodeT>::NodeRef;
-  static_assert(std::is_pointer<NodePtr>::value,
-                "NodePtr should be a pointer type");
-
-  SemiNCATy<NodePtr> SNCA;
+template <class DomTreeT>
+bool Verify(const DomTreeT &DT) {
+  SemiNCAInfo<DomTreeT> SNCA;
   return SNCA.verifyReachability(DT) && SNCA.VerifyLevels(DT) &&
          SNCA.verifyNCD(DT) && SNCA.verifyParentProperty(DT) &&
          SNCA.verifySiblingProperty(DT);

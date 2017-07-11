@@ -15,10 +15,9 @@
 using namespace llvm;
 
 namespace llvm {
-template class DominanceFrontierBase<MachineBasicBlock>;
+template class DominanceFrontierBase<MachineBasicBlock, false>;
 template class ForwardDominanceFrontierBase<MachineBasicBlock>;
 }
-
 
 char MachineDominanceFrontier::ID = 0;
 

@@ -24,8 +24,8 @@ INITIALIZE_PASS(MachinePostDominatorTree, "machinepostdomtree",
 
 MachinePostDominatorTree::MachinePostDominatorTree() : MachineFunctionPass(ID) {
   initializeMachinePostDominatorTreePass(*PassRegistry::getPassRegistry());
-  DT = new DominatorTreeBase<MachineBasicBlock>(true); //true indicate
-                                                       // postdominator
+  DT = new DominatorTreeBase<MachineBasicBlock, true>();  // true indicate
+                                                          // postdominator
 }
 
 FunctionPass *

@@ -61,34 +61,36 @@ bool BasicBlockEdge::isSingleEdge() const {
 //===----------------------------------------------------------------------===//
 
 template class llvm::DomTreeNodeBase<BasicBlock>;
-template class llvm::DominatorTreeBase<BasicBlock>;
+template class llvm::DominatorTreeBase<BasicBlock, false>;
 
-template void llvm::DomTreeBuilder::Calculate<Function, BasicBlock *>(
+template void
+llvm::DomTreeBuilder::Calculate<Function, DomTreeBuilder::BBDomTree>(
     DomTreeBuilder::BBDomTree &DT, Function &F);
 
-template void llvm::DomTreeBuilder::Calculate<Function, Inverse<BasicBlock *>>(
+template void
+llvm::DomTreeBuilder::Calculate<Function, DomTreeBuilder::InvBBDomTree>(
     DomTreeBuilder::InvBBDomTree &DT, Function &F);
 
-template void llvm::DomTreeBuilder::InsertEdge<BasicBlock *>(
+template void llvm::DomTreeBuilder::InsertEdge<DomTreeBuilder::BBDomTree>(
     DomTreeBuilder::BBDomTree &DT, DomTreeBuilder::BBNodeRef From,
     DomTreeBuilder::BBNodeRef To);
 
-template void llvm::DomTreeBuilder::InsertEdge<Inverse<BasicBlock *>>(
-    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::InvBBNodeRef From,
-    DomTreeBuilder::InvBBNodeRef To);
+template void llvm::DomTreeBuilder::InsertEdge<DomTreeBuilder::InvBBDomTree>(
+    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::BBNodeRef From,
+    DomTreeBuilder::BBNodeRef To);
 
-template void llvm::DomTreeBuilder::DeleteEdge<BasicBlock *>(
+template void llvm::DomTreeBuilder::DeleteEdge<DomTreeBuilder::BBDomTree>(
     DomTreeBuilder::BBDomTree &DT, DomTreeBuilder::BBNodeRef From,
     DomTreeBuilder::BBNodeRef To);
 
-template void llvm::DomTreeBuilder::DeleteEdge<Inverse<BasicBlock *>>(
-    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::InvBBNodeRef From,
-    DomTreeBuilder::InvBBNodeRef To);
+template void llvm::DomTreeBuilder::DeleteEdge<DomTreeBuilder::InvBBDomTree>(
+    DomTreeBuilder::InvBBDomTree &DT, DomTreeBuilder::BBNodeRef From,
+    DomTreeBuilder::BBNodeRef To);
 
-template bool llvm::DomTreeBuilder::Verify<BasicBlock *>(
+template bool llvm::DomTreeBuilder::Verify<DomTreeBuilder::BBDomTree>(
     const DomTreeBuilder::BBDomTree &DT);
 
-template bool llvm::DomTreeBuilder::Verify<Inverse<BasicBlock *>>(
+template bool llvm::DomTreeBuilder::Verify<DomTreeBuilder::InvBBDomTree>(
     const DomTreeBuilder::InvBBDomTree &DT);
 
 bool DominatorTree::invalidate(Function &F, const PreservedAnalyses &PA,

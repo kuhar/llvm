@@ -34,33 +34,31 @@ class Module;
 class raw_ostream;
 
 extern template class DomTreeNodeBase<BasicBlock>;
-extern template class DominatorTreeBase<BasicBlock>;
+extern template class DominatorTreeBase<BasicBlock, false>;
+extern template class DominatorTreeBase<BasicBlock, false>;
 
 namespace DomTreeBuilder {
-using BBDomTree = DominatorTreeBaseByGraphTraits<GraphTraits<BasicBlock *>>;
-using InvBBDomTree =
-    DominatorTreeBaseByGraphTraits<GraphTraits<Inverse<BasicBlock *>>>;
-using BBNodeRef = GraphTraits<BasicBlock *>::NodeRef;
-using InvBBNodeRef = GraphTraits<Inverse<BasicBlock *>>::NodeRef;
+using BBDomTree = DominatorTreeBase<BasicBlock, false>;
+using InvBBDomTree = DominatorTreeBase<BasicBlock, true>;
+using BBNodeRef = BasicBlock *;
 
-extern template void Calculate<Function, BasicBlock *>(BBDomTree &DT,
+extern template void Calculate<Function, BBDomTree>(BBDomTree &DT, Function &F);
+
+extern template void Calculate<Function, InvBBDomTree>(InvBBDomTree &DT,
                                                        Function &F);
-extern template void Calculate<Function, Inverse<BasicBlock *>>(
-    InvBBDomTree &DT, Function &F);
 
-extern template void InsertEdge<BasicBlock *>(BBDomTree &DT, BBNodeRef From,
+extern template void InsertEdge<BBDomTree>(BBDomTree &DT, BBNodeRef From,
+                                           BBNodeRef To);
+extern template void InsertEdge<InvBBDomTree>(InvBBDomTree &DT, BBNodeRef From,
                                               BBNodeRef To);
-extern template void InsertEdge<Inverse<BasicBlock *>>(InvBBDomTree &DT,
-                                                       InvBBNodeRef From,
-                                                       InvBBNodeRef To);
-extern template void DeleteEdge<BasicBlock *>(BBDomTree &DT, BBNodeRef From,
-                                              BBNodeRef To);
-extern template void DeleteEdge<Inverse<BasicBlock *>>(InvBBDomTree &DT,
-                                                       InvBBNodeRef From,
-                                                       InvBBNodeRef To);
 
-extern template bool Verify<BasicBlock *>(const BBDomTree &DT);
-extern template bool Verify<Inverse<BasicBlock *>>(const InvBBDomTree &DT);
+extern template void DeleteEdge<BBDomTree>(BBDomTree &DT, BBNodeRef From,
+                                           BBNodeRef To);
+extern template void DeleteEdge<InvBBDomTree>(InvBBDomTree &DT, BBNodeRef From,
+                                              BBNodeRef To);
+
+extern template bool Verify<BBDomTree>(const BBDomTree &DT);
+extern template bool Verify<InvBBDomTree>(const InvBBDomTree &DT);
 }  // namespace DomTreeBuilder
 
 using DomTreeNode = DomTreeNodeBase<BasicBlock>;
@@ -133,14 +131,12 @@ template <> struct DenseMapInfo<BasicBlockEdge> {
 /// the dominator tree is initially constructed may still exist in the tree,
 /// even if the tree is properly updated. Calling code should not rely on the
 /// preceding statements; this is stated only to assist human understanding.
-class DominatorTree : public DominatorTreeBase<BasicBlock> {
-public:
-  using Base = DominatorTreeBase<BasicBlock>;
+class DominatorTree : public DominatorTreeBase<BasicBlock, false> {
+ public:
+  using Base = DominatorTreeBase<BasicBlock, false>;
 
-  DominatorTree() : DominatorTreeBase<BasicBlock>(false) {}
-  explicit DominatorTree(Function &F) : DominatorTreeBase<BasicBlock>(false) {
-    recalculate(F);
-  }
+  DominatorTree() = default;
+  explicit DominatorTree(Function &F) { recalculate(F); }
 
   /// Handle invalidation explicitly.
   bool invalidate(Function &F, const PreservedAnalyses &PA,

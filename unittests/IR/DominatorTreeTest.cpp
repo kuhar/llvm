@@ -22,16 +22,16 @@
 using namespace llvm;
 
 /// Build the dominator tree for the function and run the Test.
-static void
-runWithDomTree(Module &M, StringRef FuncName,
-               function_ref<void(Function &F, DominatorTree *DT,
-                                 DominatorTreeBase<BasicBlock> *PDT)>
-                   Test) {
+static void runWithDomTree(
+    Module &M, StringRef FuncName,
+    function_ref<void(Function &F, DominatorTree *DT,
+                      DominatorTreeBase<BasicBlock, true> *PDT)>
+        Test) {
   auto *F = M.getFunction(FuncName);
   ASSERT_NE(F, nullptr) << "Could not find " << FuncName;
   // Compute the dominator tree for the function.
   DominatorTree DT(*F);
-  DominatorTreeBase<BasicBlock> PDT(/*isPostDom*/ true);
+  DominatorTreeBase<BasicBlock, /*isPostDom*/ true> PDT;
   PDT.recalculate(*F);
   Test(*F, &DT, &PDT);
 }
@@ -75,7 +75,8 @@ TEST(DominatorTree, Unreachable) {
 
   runWithDomTree(
       *M, "f",
-      [&](Function &F, DominatorTree *DT, DominatorTreeBase<BasicBlock> *PDT) {
+      [&](Function &F, DominatorTree *DT,
+          DominatorTreeBase<BasicBlock, true> *PDT) {
         Function::iterator FI = F.begin();
 
         BasicBlock *BB0 = &*FI++;
@@ -296,7 +297,8 @@ TEST(DominatorTree, NonUniqueEdges) {
 
   runWithDomTree(
       *M, "f",
-      [&](Function &F, DominatorTree *DT, DominatorTreeBase<BasicBlock> *PDT) {
+      [&](Function &F, DominatorTree *DT,
+          DominatorTreeBase<BasicBlock, true> *PDT) {
         Function::iterator FI = F.begin();
 
         BasicBlock *BB0 = &*FI++;

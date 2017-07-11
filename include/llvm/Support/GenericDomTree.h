@@ -41,33 +41,21 @@
 
 namespace llvm {
 
-template <class NodeT> class DominatorTreeBase;
-
-namespace detail {
-
-template <typename GT> struct DominatorTreeBaseTraits {
-  static_assert(std::is_pointer<typename GT::NodeRef>::value,
-                "Currently NodeRef must be a pointer type.");
-  using type = DominatorTreeBase<
-      typename std::remove_pointer<typename GT::NodeRef>::type>;
-};
-
-} // end namespace detail
-
-template <typename GT>
-using DominatorTreeBaseByGraphTraits =
-    typename detail::DominatorTreeBaseTraits<GT>::type;
+template <class NodeT, bool IsPostDom>
+class DominatorTreeBase;
 
 namespace DomTreeBuilder {
-template<class NodeT>
+template <class DomTreeT>
 struct SemiNCAInfo;
 }  // namespace DomTreeBuilder
 
 /// \brief Base class for the actual dominator tree node.
 template <class NodeT> class DomTreeNodeBase {
   friend struct PostDominatorTree;
-  template <class N> friend class DominatorTreeBase;
-  friend struct DomTreeBuilder::SemiNCAInfo<NodeT>;
+  friend class DominatorTreeBase<NodeT, false>;
+  friend class DominatorTreeBase<NodeT, true>;
+  friend struct DomTreeBuilder::SemiNCAInfo<DominatorTreeBase<NodeT, false>>;
+  friend struct DomTreeBuilder::SemiNCAInfo<DominatorTreeBase<NodeT, true>>;
 
   NodeT *TheBB;
   DomTreeNodeBase *IDom;
@@ -199,31 +187,29 @@ void PrintDomTree(const DomTreeNodeBase<NodeT> *N, raw_ostream &O,
 
 namespace DomTreeBuilder {
 // The functions below are provided in a separate header but referenced here.
-template <class FuncT, class N>
-void Calculate(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT, FuncT &F);
+template <class FuncT, class DomTreeT>
+void Calculate(DomTreeT &DT, FuncT &F);
 
-template <class N>
-void InsertEdge(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
-                typename GraphTraits<N>::NodeRef From,
-                typename GraphTraits<N>::NodeRef To);
+template <class DomTreeT>
+void InsertEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
+                typename DomTreeT::NodePtr To);
 
-template <class N>
-void DeleteEdge(DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT,
-                typename GraphTraits<N>::NodeRef From,
-                typename GraphTraits<N>::NodeRef To);
+template <class DomTreeT>
+void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
+                typename DomTreeT::NodePtr To);
 
-template <class N>
-bool Verify(const DominatorTreeBaseByGraphTraits<GraphTraits<N>> &DT);
+template <class DomTreeT>
+bool Verify(const DomTreeT &DT);
 }  // namespace DomTreeBuilder
 
 /// \brief Core dominator tree base class.
 ///
 /// This class is a generic template over graph nodes. It is instantiated for
 /// various graphs in the LLVM IR or in the code generator.
-template <class NodeT> class DominatorTreeBase {
+template <class NodeT, bool IsPostDom>
+class DominatorTreeBase {
  protected:
   std::vector<NodeT *> Roots;
-  bool IsPostDominators;
 
   using DomTreeNodeMapType =
      DenseMap<NodeT *, std::unique_ptr<DomTreeNodeBase<NodeT>>>;
@@ -233,15 +219,19 @@ template <class NodeT> class DominatorTreeBase {
   mutable bool DFSInfoValid = false;
   mutable unsigned int SlowQueries = 0;
 
-  friend struct DomTreeBuilder::SemiNCAInfo<NodeT>;
-  using SNCAInfoTy = DomTreeBuilder::SemiNCAInfo<NodeT>;
+  friend struct DomTreeBuilder::SemiNCAInfo<DominatorTreeBase>;
 
  public:
-  explicit DominatorTreeBase(bool isPostDom) : IsPostDominators(isPostDom) {}
+  static_assert(std::is_pointer<typename GraphTraits<NodeT *>::NodeRef>::value,
+                "Currently DominatorTreeBase supports only pointer nodes");
+  using NodeType = NodeT;
+  using NodePtr = NodeT *;
+  static constexpr bool IsPostDominators = IsPostDom;
+
+  DominatorTreeBase() = default;
 
   DominatorTreeBase(DominatorTreeBase &&Arg)
       : Roots(std::move(Arg.Roots)),
-        IsPostDominators(Arg.IsPostDominators),
         DomTreeNodes(std::move(Arg.DomTreeNodes)),
         RootNode(std::move(Arg.RootNode)),
         DFSInfoValid(std::move(Arg.DFSInfoValid)),
@@ -251,7 +241,7 @@ template <class NodeT> class DominatorTreeBase {
 
   DominatorTreeBase &operator=(DominatorTreeBase &&RHS) {
     Roots = std::move(RHS.Roots);
-    IsPostDominators = RHS.IsPostDominators;
+    assert(IsPostDom == IsPostDominators);
     DomTreeNodes = std::move(RHS.DomTreeNodes);
     RootNode = std::move(RHS.RootNode);
     DFSInfoValid = std::move(RHS.DFSInfoValid);
@@ -460,17 +450,11 @@ template <class NodeT> class DominatorTreeBase {
   // the CFG.
 
   void insertEdge(NodeT *From, NodeT *To) {
-    if (isPostDominator())
-      DomTreeBuilder::InsertEdge<Inverse<NodeT *>>(*this, To, From);
-    else
-      DomTreeBuilder::InsertEdge<NodeT *>(*this, From, To);
+    DomTreeBuilder::InsertEdge(*this, From, To);
   }
 
   void deleteEdge(NodeT *From, NodeT *To) {
-    if (isPostDominator())
-      DomTreeBuilder::DeleteEdge<Inverse<NodeT *>>(*this, To, From);
-    else
-      DomTreeBuilder::DeleteEdge<NodeT *>(*this, From, To);
+    DomTreeBuilder::DeleteEdge(*this, From, To);
   }
 
   /// Add a new node to the dominator tree information.
@@ -639,23 +623,19 @@ public:
       NodeT *entry = TraitsTy::getEntryNode(&F);
       addRoot(entry);
 
-      DomTreeBuilder::Calculate<FT, NodeT *>(*this, F);
+      DomTreeBuilder::Calculate<FT>(*this, F);
     } else {
       // Initialize the roots list
       for (auto *Node : nodes(&F))
         if (TraitsTy::child_begin(Node) == TraitsTy::child_end(Node))
           addRoot(Node);
 
-      DomTreeBuilder::Calculate<FT, Inverse<NodeT *>>(*this, F);
+      DomTreeBuilder::Calculate<FT>(*this, F);
     }
   }
 
   /// verify - check parent and sibling property
-  bool verify() const {
-    return this->isPostDominator()
-           ? DomTreeBuilder::Verify<Inverse<NodeT *>>(*this)
-           : DomTreeBuilder::Verify<NodeT *>(*this);
-  }
+  bool verify() const { return DomTreeBuilder::Verify(*this); }
 
  protected:
   void addRoot(NodeT *BB) { this->Roots.push_back(BB); }
@@ -750,8 +730,9 @@ public:
 
 // These two functions are declared out of line as a workaround for building
 // with old (< r147295) versions of clang because of pr11642.
-template <class NodeT>
-bool DominatorTreeBase<NodeT>::dominates(const NodeT *A, const NodeT *B) const {
+template <class NodeT, bool IsPostDom>
+bool DominatorTreeBase<NodeT, IsPostDom>::dominates(const NodeT *A,
+                                                    const NodeT *B) const {
   if (A == B)
     return true;
 
@@ -761,9 +742,9 @@ bool DominatorTreeBase<NodeT>::dominates(const NodeT *A, const NodeT *B) const {
   return dominates(getNode(const_cast<NodeT *>(A)),
                    getNode(const_cast<NodeT *>(B)));
 }
-template <class NodeT>
-bool DominatorTreeBase<NodeT>::properlyDominates(const NodeT *A,
-                                                 const NodeT *B) const {
+template <class NodeT, bool IsPostDom>
+bool DominatorTreeBase<NodeT, IsPostDom>::properlyDominates(
+    const NodeT *A, const NodeT *B) const {
   if (A == B)
     return false;
 

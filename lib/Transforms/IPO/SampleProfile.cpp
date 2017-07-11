@@ -173,8 +173,9 @@ protected:
   void printBlockEquivalence(raw_ostream &OS, const BasicBlock *BB);
   bool computeBlockWeights(Function &F);
   void findEquivalenceClasses(Function &F);
+  template <bool IsPostDom>
   void findEquivalencesFor(BasicBlock *BB1, ArrayRef<BasicBlock *> Descendants,
-                           DominatorTreeBase<BasicBlock> *DomTree);
+                           DominatorTreeBase<BasicBlock, IsPostDom> *DomTree);
   void propagateWeights(Function &F);
   uint64_t visitEdge(Edge E, unsigned *NumUnknownEdges, Edge *UnknownEdge);
   void buildEdges(Function &F);
@@ -217,7 +218,7 @@ protected:
 
   /// \brief Dominance, post-dominance and loop information.
   std::unique_ptr<DominatorTree> DT;
-  std::unique_ptr<DominatorTreeBase<BasicBlock>> PDT;
+  std::unique_ptr<DominatorTreeBase<BasicBlock, true>> PDT;
   std::unique_ptr<LoopInfo> LI;
 
   AssumptionCacheTracker *ACT;
@@ -773,9 +774,44 @@ bool SampleProfileLoader::inlineHotFunctions(
 /// \param DomTree  Opposite dominator tree. If \p Descendants is filled
 ///                 with blocks from \p BB1's dominator tree, then
 ///                 this is the post-dominator tree, and vice versa.
-void SampleProfileLoader::findEquivalencesFor(
+template <>
+void SampleProfileLoader::findEquivalencesFor<false>(
     BasicBlock *BB1, ArrayRef<BasicBlock *> Descendants,
-    DominatorTreeBase<BasicBlock> *DomTree) {
+    DominatorTreeBase<BasicBlock, false> *DomTree) {
+  const BasicBlock *EC = EquivalenceClass[BB1];
+  uint64_t Weight = BlockWeights[EC];
+  for (const auto *BB2 : Descendants) {
+    bool IsDomParent = DomTree->dominates(BB2, BB1);
+    bool IsInSameLoop = LI->getLoopFor(BB1) == LI->getLoopFor(BB2);
+    if (BB1 != BB2 && IsDomParent && IsInSameLoop) {
+      EquivalenceClass[BB2] = EC;
+      // If BB2 is visited, then the entire EC should be marked as visited.
+      if (VisitedBlocks.count(BB2)) {
+        VisitedBlocks.insert(EC);
+      }
+
+      // If BB2 is heavier than BB1, make BB2 have the same weight
+      // as BB1.
+      //
+      // Note that we don't worry about the opposite situation here
+      // (when BB2 is lighter than BB1). We will deal with this
+      // during the propagation phase. Right now, we just want to
+      // make sure that BB1 has the largest weight of all the
+      // members of its equivalence set.
+      Weight = std::max(Weight, BlockWeights[BB2]);
+    }
+  }
+  if (EC == &EC->getParent()->getEntryBlock()) {
+    BlockWeights[EC] = Samples->getHeadSamples() + 1;
+  } else {
+    BlockWeights[EC] = Weight;
+  }
+}
+
+template <>
+void SampleProfileLoader::findEquivalencesFor<true>(
+    BasicBlock *BB1, ArrayRef<BasicBlock *> Descendants,
+    DominatorTreeBase<BasicBlock, true> *DomTree) {
   const BasicBlock *EC = EquivalenceClass[BB1];
   uint64_t Weight = BlockWeights[EC];
   for (const auto *BB2 : Descendants) {
@@ -1283,7 +1319,7 @@ void SampleProfileLoader::computeDominanceAndLoopInfo(Function &F) {
   DT.reset(new DominatorTree);
   DT->recalculate(F);
 
-  PDT.reset(new DominatorTreeBase<BasicBlock>(true));
+  PDT.reset(new DominatorTreeBase<BasicBlock, true>());
   PDT->recalculate(F);
 
   LI.reset(new LoopInfo);
