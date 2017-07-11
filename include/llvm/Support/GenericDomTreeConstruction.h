@@ -770,7 +770,7 @@ struct SemiNCAInfo {
       assert(ToTN);
 
       const NodePtr NCD = DT.findNearestCommonDominator(From, To);
-      const TreeNodePtr NCDTN = NCD ? DT.getNode(NCD) : nullptr;
+      const TreeNodePtr NCDTN = DT.getNode(NCD);
       const TreeNodePtr ToIDom = ToTN->getIDom();
 
       // Handle virtual root when DT is a postdominator tree.
