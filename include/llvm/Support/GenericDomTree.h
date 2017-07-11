@@ -354,6 +354,10 @@ class DominatorTreeBase {
 
   bool isReachableFromEntry(const DomTreeNodeBase<NodeT> *A) const { return A; }
 
+  bool isVirtualRoot(const DomTreeNodeBase<NodeT> *A) const {
+    return IsPostDominators && !A->getBlock();
+  }
+
   /// dominates - Returns true iff A dominates B.  Note that this is not a
   /// constant time operation!
   ///
@@ -642,7 +646,7 @@ public:
 
   void reset() {
     DomTreeNodes.clear();
-    this->Roots.clear();
+    Roots.clear();
     RootNode = nullptr;
     DFSInfoValid = false;
     SlowQueries = 0;

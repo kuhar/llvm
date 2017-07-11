@@ -369,14 +369,13 @@ struct SemiNCAInfo {
                     << " -> " << BlockPrinter(To->getBlock()) << "\n");
     const NodePtr NCDBlock = DT.findNearestCommonDominator(From->getBlock(),
                                                                To->getBlock());
-    assert(NCDBlock);
+    assert(NCDBlock || DT.isPostDominator());
     const TreeNodePtr NCD = DT.getNode(NCDBlock);
     assert(NCD);
 
     DTB_DEBUG(dbgs() << "\t\tNCA == " << BlockPrinter(NCD) << "\n");
     const TreeNodePtr ToIDom = To->getIDom();
 
-    assert(NCD);
     // Nothing affected.
     if (NCD == To || NCD == ToIDom)
       return;
@@ -517,13 +516,13 @@ struct SemiNCAInfo {
 
     const TreeNodePtr ToTN = DT.getNode(To);
     const NodePtr NCDBlock = DT.findNearestCommonDominator(From, To);
-    const TreeNodePtr NCD = NCDBlock ? DT.getNode(NCDBlock) : nullptr;
+    const TreeNodePtr NCD = DT.getNode(NCDBlock);
 
     // To dominates From -- nothing to do.
     if (ToTN == NCD) return;
 
     const TreeNodePtr ToIDom = ToTN->getIDom();
-    DTB_DEBUG(dbgs() << "\tNCD" << BlockPrinter(NCD) << ", ToIDom "
+    DTB_DEBUG(dbgs() << "\tNCD " << BlockPrinter(NCD) << ", ToIDom "
                      << BlockPrinter(ToIDom) << "\n");
 
     if (FromTN != ToIDom || IsReachableFromIDom(DT, ToTN))
@@ -540,10 +539,17 @@ struct SemiNCAInfo {
 
     const NodePtr ToIDom =
         DT.findNearestCommonDominator(FromTN->getBlock(), ToTN->getBlock());
-    assert(ToIDom);
+    assert(ToIDom || DT.isPostDominator());
     const TreeNodePtr ToIDomTN = DT.getNode(ToIDom);
+    assert(ToIDomTN);
     const TreeNodePtr PrevIDomSubTree = ToIDomTN->getIDom();
-    assert(PrevIDomSubTree);
+    if (!PrevIDomSubTree) {
+      DTB_DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
+      assert(ToTN->getBlock());
+      DT.recalculate(*ToTN->getBlock()->getParent());
+      return;
+    }
+
     const unsigned Level = ToIDomTN->getLevel();
 
     auto DescendBelow = [Level, &DT](NodePtr, NodePtr To) {
@@ -584,6 +590,7 @@ struct SemiNCAInfo {
     DTB_DEBUG(dbgs() << "Deleting unreachable subtree " << BlockPrinter(ToTN)
                      << "\n");
     assert(ToTN);
+    assert(ToTN->getBlock());
 
     SmallVector<NodePtr, 16> AffectedQueue;
     const unsigned Level = ToTN->getLevel();
@@ -600,7 +607,7 @@ struct SemiNCAInfo {
 
     SemiNCAInfo SNCA;
     unsigned LastDFSNum =
-        SNCA.runDFS<false>(ToTN->getBlock(), 0, DescendAndCollect, 0);
+        SNCA.runDFS<IsPostDom>(ToTN->getBlock(), 0, DescendAndCollect, 0);
 
     TreeNodePtr MinNode = ToTN;
 
@@ -608,11 +615,22 @@ struct SemiNCAInfo {
       const TreeNodePtr TN = DT.getNode(N);
       const NodePtr NCDBlock =
           DT.findNearestCommonDominator(TN->getBlock(), ToTN->getBlock());
-      assert(NCDBlock);
+      assert(NCDBlock || DT.isPostDominator());
       const TreeNodePtr NCD = DT.getNode(NCDBlock);
       assert(NCD);
 
+      DTB_DEBUG(dbgs() << "Processing affected node " << BlockPrinter(TN)
+                       << " with NCD = " << BlockPrinter(NCD)
+                       << ", MinNode =" << BlockPrinter(MinNode) << "\n");
       if (NCD != TN && NCD->getLevel() < MinNode->getLevel()) MinNode = NCD;
+    }
+
+    if (!MinNode->getIDom()) {
+      DTB_DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
+      auto *const Parent = ToTN->getBlock()->getParent();
+      assert(Parent);
+      DT.recalculate(*Parent);
+      return;
     }
 
     for (unsigned i = LastDFSNum; i > 0; --i) {
@@ -630,15 +648,13 @@ struct SemiNCAInfo {
     const unsigned MinLevel = MinNode->getLevel();
     const TreeNodePtr PrevIDom = MinNode->getIDom();
     assert(PrevIDom);
-
     SNCA.clear();
-    LastDFSNum =
-        SNCA.runDFS<false>(MinNode->getBlock(), 0,
-                           [MinLevel, &DT](NodePtr, NodePtr To) {
-                             const TreeNodePtr ToTN = DT.getNode(To);
-                             return ToTN && ToTN->getLevel() > MinLevel;
-                           },
-                           0);
+
+    auto DescendBelow = [MinLevel, &DT](NodePtr, NodePtr To) {
+      const TreeNodePtr ToTN = DT.getNode(To);
+      return ToTN && ToTN->getLevel() > MinLevel;
+    };
+    SNCA.runDFS<IsPostDom>(MinNode->getBlock(), 0, DescendBelow, 0);
 
     DTB_DEBUG(dbgs() << "\nDFSNumbering:\n");
     for (unsigned i = 1; i < SNCA.NumToNode.size(); ++i)
@@ -683,6 +699,9 @@ struct SemiNCAInfo {
     for (auto &NodeToTN : DT.DomTreeNodes) {
       const TreeNodePtr TN = NodeToTN.second.get();
       const NodePtr BB = TN->getBlock();
+
+      // Handle virtual root node when the DT is a postdomiantor tree.
+      if (DT.isVirtualRoot(TN)) continue;
 
       if (!BB || NodeToInfo.count(BB) == 0) {
         errs() << "DomTree node " << BlockPrinter(BB)
@@ -756,6 +775,10 @@ struct SemiNCAInfo {
       const NodePtr NCD = DT.findNearestCommonDominator(From, To);
       const TreeNodePtr NCDTN = NCD ? DT.getNode(NCD) : nullptr;
       const TreeNodePtr ToIDom = ToTN->getIDom();
+
+      // Handle virtual root when DT is a postdominator tree.
+      if (!NCD && ToIDom && DT.isVirtualRoot(ToIDom)) continue;
+
       if (NCDTN != ToTN && NCDTN != ToIDom) {
         errs() << "NearestCommonDominator verification failed:\n\tNCD(From:"
                << BlockPrinter(From) << ", To:" << BlockPrinter(To) << ") = "
@@ -885,18 +908,14 @@ void Calculate(DomTreeT &DT, FuncT &F) {
 template <class DomTreeT>
 void InsertEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To) {
-  if (DT.isPostDominator())
-    llvm_unreachable("Insertions are not implemented for postdominators yet");
-
+  if (DT.isPostDominator()) std::swap(From, To);
   SemiNCAInfo<DomTreeT>::InsertEdge(DT, From, To);
 }
 
 template <class DomTreeT>
 void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To) {
-  if (DT.isPostDominator())
-    llvm_unreachable("Deletions are not implemented for postdominators yet");
-
+  if (DT.isPostDominator()) std::swap(From, To);
   SemiNCAInfo<DomTreeT>::DeleteEdge(DT, From, To);
 }
 
