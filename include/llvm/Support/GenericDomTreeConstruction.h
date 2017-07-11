@@ -272,17 +272,22 @@ struct SemiNCAInfo {
     DT.RootNode = (DT.DomTreeNodes[Root] =
                        llvm::make_unique<DomTreeNodeBase<NodeT>>(Root, nullptr))
                       .get();
+    attachNewSubtree(DT, DT.RootNode);
+  }
 
-    // Loop over all of the reachable blocks in the function...
-    for (unsigned i = 2; i <= LastDFSNum; ++i) {
+  void attachNewSubtree(DomTreeT& DT, const TreeNodePtr AttachTo) {
+    // Attach the first unreachable block to AttachTo.
+    NodeToInfo[NumToNode[1]].IDom = AttachTo->getBlock();
+    // Loop over all of the discovered blocks in the function...
+    for (size_t i = 1, e = NumToNode.size(); i != e; ++i) {
       NodePtr W = NumToNode[i];
+      DTB_DEBUG(dbgs() << "\tdiscovereed ureachable node " << BlockPrinter(W)
+                       << "\n");
 
       // Don't replace this with 'count', the insertion side effect is important
       if (DT.DomTreeNodes[W]) continue;  // Haven't calculated this node yet?
 
       NodePtr ImmDom = getIDom(W);
-
-      assert(ImmDom || DT.DomTreeNodes[nullptr]);
 
       // Get or calculate the node for the immediate dominator
       TreeNodePtr IDomNode = getNodeForBlock(ImmDom, DT);
@@ -291,6 +296,17 @@ struct SemiNCAInfo {
       // IDomNode
       DT.DomTreeNodes[W] = IDomNode->addChild(
           llvm::make_unique<DomTreeNodeBase<NodeT>>(W, IDomNode));
+    }
+  }
+
+  void reattachExistingSubtree(DomTreeT& DT, const TreeNodePtr AttachTo) {
+    NodeToInfo[NumToNode[1]].IDom = AttachTo->getBlock();
+    for (size_t i = 1, e = NumToNode.size(); i != e; ++i) {
+      const NodePtr N = NumToNode[i];
+      const TreeNodePtr TN = DT.getNode(N);
+      assert(TN);
+      const TreeNodePtr NewIDom = DT.getNode(NodeToInfo[N].IDom);
+      TN->setIDom(NewIDom);
     }
   }
 
@@ -462,31 +478,9 @@ struct SemiNCAInfo {
     };
 
     SemiNCAInfo SNCA;
-    const unsigned LastDFSNum =
-        SNCA.runDFS<IsPostDom>(Root, 0, UnreachableDescender, 0);
+    SNCA.runDFS<IsPostDom>(Root, 0, UnreachableDescender, 0);
     SNCA.runSemiNCA(DT);
-    // Attach the first unreachable block to Incoming.
-    SNCA.NodeToInfo[SNCA.NumToNode[1]].IDom = Incoming->getBlock();
-    // Loop over all of the discovered blocks in the function...
-    for (unsigned i = 1; i <= LastDFSNum; ++i) {
-      NodePtr W = SNCA.NumToNode[i];
-      DTB_DEBUG(dbgs() << "\tdiscovereed ureachable node " << BlockPrinter(W)
-                       << "\n");
-
-      // Don't replace this with 'count', the insertion side effect is important
-      if (DT.DomTreeNodes[W]) continue;  // Haven't calculated this node yet?
-
-      NodePtr ImmDom = SNCA.getIDom(W);
-      assert(ImmDom);
-
-      // Get or calculate the node for the immediate dominator
-      TreeNodePtr IDomNode = SNCA.getNodeForBlock(ImmDom, DT);
-
-      // Add a new tree node for this BasicBlock, and link it as a child of
-      // IDomNode
-      DT.DomTreeNodes[W] = IDomNode->addChild(
-          llvm::make_unique<DomTreeNodeBase<NodeT>>(W, IDomNode));
-    }
+    SNCA.attachNewSubtree(DT, Incoming);
 
     DTB_DEBUG(dbgs() << "After adding unreachable nodes\n");
     DTB_DEBUG(DT.print(dbgs()));
@@ -559,19 +553,10 @@ struct SemiNCAInfo {
     DTB_DEBUG(dbgs() << "\tTop of subtree: " << BlockPrinter(ToIDomTN) << "\n");
 
     SemiNCAInfo SNCA;
-    const unsigned LastDFSNum =
-        SNCA.runDFS<IsPostDom>(ToIDom, 0, DescendBelow, 0);
+    SNCA.runDFS<IsPostDom>(ToIDom, 0, DescendBelow, 0);
     DTB_DEBUG(dbgs() << "\tRunning Semi-NCA\n");
     SNCA.runSemiNCA(DT, Level);
-
-    SNCA.NodeToInfo[ToIDom].IDom = PrevIDomSubTree->getBlock();
-    for (unsigned i = 1; i <= LastDFSNum; ++i) {
-      const NodePtr N = SNCA.NumToNode[i];
-      const TreeNodePtr TN = DT.getNode(N);
-      assert(TN);
-      const TreeNodePtr NewIDom = DT.getNode(SNCA.NodeToInfo[N].IDom);
-      TN->setIDom(NewIDom);
-    }
+    SNCA.reattachExistingSubtree(DT, PrevIDomSubTree);
   }
 
   static bool IsReachableFromIDom(DomTreeT &DT, const TreeNodePtr TN) {
@@ -668,16 +653,7 @@ struct SemiNCAInfo {
                      << "\nRunning Semi-NCA\n");
 
     SNCA.runSemiNCA(DT, MinLevel);
-    SNCA.NodeToInfo[MinNode->getBlock()].IDom = PrevIDom->getBlock();
-    for (unsigned i = 1; i <= LastDFSNum; ++i) {
-      const NodePtr N = SNCA.NumToNode[i];
-      const TreeNodePtr TN = DT.getNode(N);
-      assert(TN);
-      const TreeNodePtr NewIDom = DT.getNode(SNCA.NodeToInfo[N].IDom);
-      DTB_DEBUG(dbgs() << "\t" << BlockPrinter(N) << " has a new idom "
-                       << BlockPrinter(NewIDom) << "\n");
-      TN->setIDom(NewIDom);
-    }
+    SNCA.reattachExistingSubtree(DT, PrevIDom);
   }
 
   static void EraseNode(DomTreeT &DT, const TreeNodePtr TN) {
