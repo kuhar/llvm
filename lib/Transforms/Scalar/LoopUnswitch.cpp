@@ -237,7 +237,7 @@ namespace {
     void EmitPreheaderBranchOnCondition(Value *LIC, Constant *Val,
                                         BasicBlock *TrueDest,
                                         BasicBlock *FalseDest,
-                                        Instruction *InsertPt,
+                                        BranchInst *OldBranch,
                                         TerminatorInst *TI);
 
     void SimplifyCode(std::vector<Instruction*> &Worklist, Loop *L);
@@ -896,30 +896,53 @@ static Loop *CloneLoop(Loop *L, Loop *PL, ValueToValueMapTy &VM,
 }
 
 /// Emit a conditional branch on two values if LIC == Val, branch to TrueDst,
-/// otherwise branch to FalseDest. Insert the code immediately before InsertPt.
+/// otherwise branch to FalseDest. Insert the code immediately before OldBranch
+/// and remove (but not erase!) it from the function.
 void LoopUnswitch::EmitPreheaderBranchOnCondition(Value *LIC, Constant *Val,
                                                   BasicBlock *TrueDest,
                                                   BasicBlock *FalseDest,
-                                                  Instruction *InsertPt,
+                                                  BranchInst *OldBranch,
                                                   TerminatorInst *TI) {
+  assert(OldBranch->isUnconditional() && "Preheader is not split correctly");
   // Insert a conditional branch on LIC to the two preheaders.  The original
   // code is the true version and the new code is the false version.
   Value *BranchVal = LIC;
   bool Swapped = false;
   if (!isa<ConstantInt>(Val) ||
       Val->getType() != Type::getInt1Ty(LIC->getContext()))
-    BranchVal = new ICmpInst(InsertPt, ICmpInst::ICMP_EQ, LIC, Val);
+    BranchVal = new ICmpInst(OldBranch, ICmpInst::ICMP_EQ, LIC, Val);
   else if (Val != ConstantInt::getTrue(Val->getContext())) {
     // We want to enter the new loop when the condition is true.
     std::swap(TrueDest, FalseDest);
     Swapped = true;
   }
 
+  // Old branch will be removed, so save its parent and successor to update the
+  // DomTree.
+  auto *OldBranchSucc = OldBranch->getSuccessor(0);
+  auto *OldBranchParent = OldBranch->getParent();
+
   // Insert the new branch.
   BranchInst *BI =
-      IRBuilder<>(InsertPt).CreateCondBr(BranchVal, TrueDest, FalseDest, TI);
+      IRBuilder<>(OldBranch).CreateCondBr(BranchVal, TrueDest, FalseDest, TI);
   if (Swapped)
     BI->swapProfMetadata();
+
+  // Remove the old branch so there is only one branch at the end. This is
+  // needed to perform DomTree's internal DFS walk on the function's CFG.
+  OldBranch->removeFromParent();
+
+  // Inform the DT about the new branch.
+  if (DT) {
+    // First, add both successors. If one of them is the same as OldBranchSucc
+    // it's OK to do a redundant insetion -- DT will ignore it.
+    DT->insertEdge(OldBranchParent, TrueDest);
+    DT->insertEdge(OldBranchParent, FalseDest);
+    // If both of the new successors are different from the old one, inform the
+    // DT that the edge was deleted.
+    if (OldBranchSucc != TrueDest && OldBranchSucc != FalseDest)
+      DT->deleteEdge(OldBranchParent, OldBranchSucc);
+  }
 
   // If either edge is critical, split it. This helps preserve LoopSimplify
   // form for enclosing loops.
@@ -960,10 +983,14 @@ void LoopUnswitch::UnswitchTrivialCondition(Loop *L, Value *Cond, Constant *Val,
 
   // Okay, now we have a position to branch from and a position to branch to,
   // insert the new conditional branch.
-  EmitPreheaderBranchOnCondition(Cond, Val, NewExit, NewPH,
-                                 loopPreheader->getTerminator(), TI);
-  LPM->deleteSimpleAnalysisValue(loopPreheader->getTerminator(), L);
-  loopPreheader->getTerminator()->eraseFromParent();
+  auto *OldBranch = dyn_cast<BranchInst>(loopPreheader->getTerminator());
+  assert(OldBranch && "Failed to split the preheader");
+  EmitPreheaderBranchOnCondition(Cond, Val, NewExit, NewPH, OldBranch, TI);
+  LPM->deleteSimpleAnalysisValue(OldBranch, L);
+
+  // EmitPreheaderBranchOnCondition removed the OldBranch from the function.
+  // Delete it, as it is no longer needed.
+  delete OldBranch;
 
   // We need to reprocess this loop, it could be unswitched again.
   redoLoop = true;
@@ -1278,7 +1305,10 @@ void LoopUnswitch::UnswitchNontrivialCondition(Value *LIC, Constant *Val,
   EmitPreheaderBranchOnCondition(LIC, Val, NewBlocks[0], LoopBlocks[0], OldBR,
                                  TI);
   LPM->deleteSimpleAnalysisValue(OldBR, L);
-  OldBR->eraseFromParent();
+
+  // The OldBr was replaced by a new one and removed (but not erased) by
+  // EmitPreheaderBranchOnCondition. It is no longer needed, so delete it.
+  delete OldBR;
 
   LoopProcessWorklist.push_back(NewLoop);
   redoLoop = true;

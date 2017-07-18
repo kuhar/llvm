@@ -220,37 +220,19 @@ llvm::SplitCriticalEdge(TerminatorInst *TI, unsigned SuccNum,
     }
   }
 
-  bool NewBBDominatesDestBB = true;
-
-  // Should we update DominatorTree information?
   if (DT) {
-    DomTreeNode *TINode = DT->getNode(TIBB);
-
-    // The new block is not the immediate dominator for any other nodes, but
-    // TINode is the immediate dominator for the new node.
+    // Update the DominatorTree.
+    //       ---> NewBB -----\
+    //      /                 V
+    //  TIBB ---------------> DestBB
     //
-    if (TINode) {       // Don't break unreachable code!
-      DomTreeNode *NewBBNode = DT->addNewBlock(NewBB, TIBB);
-      DomTreeNode *DestBBNode = nullptr;
-
-      // If NewBBDominatesDestBB hasn't been computed yet, do so with DT.
-      if (!OtherPreds.empty()) {
-        DestBBNode = DT->getNode(DestBB);
-        while (!OtherPreds.empty() && NewBBDominatesDestBB) {
-          if (DomTreeNode *OPNode = DT->getNode(OtherPreds.back()))
-            NewBBDominatesDestBB = DT->dominates(DestBBNode, OPNode);
-          OtherPreds.pop_back();
-        }
-        OtherPreds.clear();
-      }
-
-      // If NewBBDominatesDestBB, then NewBB dominates DestBB, otherwise it
-      // doesn't dominate anything.
-      if (NewBBDominatesDestBB) {
-        if (!DestBBNode) DestBBNode = DT->getNode(DestBB);
-        DT->changeImmediateDominator(DestBBNode, NewBBNode);
-      }
-    }
+    // First, inform the DT about the new path from TIBB to DestBB via NewBB,
+    // then delete the old edge from TIBB to DestBB. By doing this in that order
+    // DestBB stays reachable in the DT the whole time and its subtree doesn't
+    // get disconnected.
+    DT->insertEdge(TIBB, NewBB);
+    DT->insertEdge(NewBB, DestBB);
+    DT->deleteEdge(TIBB, DestBB);
   }
 
   // Update LoopInfo if it is around.
