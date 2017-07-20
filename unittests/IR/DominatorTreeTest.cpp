@@ -340,35 +340,24 @@ TEST(DominatorTree, NonUniqueEdges) {
 //        ^  v  \                  B
 //        \ /    D                / \
 //         C      \              C   A
-//                v
+//                 \
 //                Exit
 //
 // we verify that CFG' and PDT-updated is obtained after removal of edge C -> B.
+// The updated PDT is the same as a freshly constructed one.
 //
 //          CFG'               PDT-updated
 //
-//           A                    Exit
-//           |                     |
-//           B                     D
-//           | \                   |
-//           v  \                  B
-//          /    D                  \
-//         C      \                  A
-//        |       v
+//            A                   Exit
+//            |                  / | \
+//            B                 C  B  D
+//           / \                   |
+//          /   \                  A
+//         /     D
+//         C      \
+//         |       |
 // unreachable    Exit
 //
-// WARNING: PDT-updated is inconsistent with PDT-recalculated, which is
-//          constructed from CFG' when recalculating the PDT from scratch.
-//
-//         PDT-recalculated
-//
-//            Exit
-//           / | \
-//          C  B  D
-//             |
-//             A
-//
-// TODO: document the wanted behavior after resolving this inconsistency.
 TEST(DominatorTree, DeletingEdgesIntroducesUnreachables) {
   StringRef ModuleString =
       "define void @f() {\n"
@@ -401,15 +390,15 @@ TEST(DominatorTree, DeletingEdgesIntroducesUnreachables) {
         new UnreachableInst(C->getContext(), C);
 
         DT->deleteEdge(C, B);
+        EXPECT_TRUE(DT->verify());
         PDT->deleteEdge(C, B);
-
-        EXPECT_TRUE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
-        EXPECT_EQ(PDT->getNode(C), nullptr);
-
-        PDT->recalculate(F);
+        EXPECT_TRUE(PDT->verify());
 
         EXPECT_FALSE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
         EXPECT_NE(PDT->getNode(C), nullptr);
+
+        PostDomTree Fresh(F);
+        EXPECT_EQ(PDT->compare(Fresh), false);  // Trees expected to be equal.
       });
 }
 
@@ -444,7 +433,7 @@ TEST(DominatorTree, DeletingEdgesIntroducesUnreachables) {
 //          /    D                  \
 //         C      \                  A
 //        / \      v
-//       ^  v      Exit
+//       ^   v    Exit
 //        \_/
 //
 // In PDT, D post-dominates B. We verify that this post-dominance
@@ -453,8 +442,7 @@ TEST(DominatorTree, DeletingEdgesIntroducesUnreachables) {
 // As C now becomes reverse-unreachable, it is not anymore part of the
 // PDT. We also verify this property.
 //
-// TODO: Can we change the PDT definition such that C remains part of the
-//       CFG?
+// TODO: Can we change the PDT definition such that C remains part of the CFG?
 TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop) {
   StringRef ModuleString =
       "define void @f() {\n"
@@ -488,15 +476,15 @@ TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop) {
         auto SwitchC = cast<SwitchInst>(C->getTerminator());
         SwitchC->removeCase(SwitchC->case_begin());
         DT->deleteEdge(C, B);
+        EXPECT_TRUE(DT->verify());
         PDT->deleteEdge(C, B);
+        EXPECT_TRUE(PDT->verify());
 
         EXPECT_TRUE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
         EXPECT_EQ(PDT->getNode(C), nullptr);
 
-        PDT->recalculate(F);
-
-        EXPECT_TRUE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
-        EXPECT_EQ(PDT->getNode(C), nullptr);
+        PostDomTree Fresh(F);
+        EXPECT_EQ(PDT->compare(Fresh), false);  // Trees expected to be equal.
       });
 }
 
@@ -513,15 +501,15 @@ TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop) {
 //           |  \                  |
 //           v   \                 A
 //          /     D
-//         C--C2   \
+//         C->C2   \
 //        / \  \    v
-//       ^  v  --Exit
+//       ^   v  -->Exit
 //        \_/
 //
 // After deleting the edge C->E, C is part of an infinite reverse-unreachable
 // loop:
 //
-//          CFG'                   PDT'
+//          CFG'                  PDT'
 //
 //           A                    Exit
 //           |                     |
@@ -540,8 +528,7 @@ TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop) {
 // As C now becomes reverse-unreachable, it is not anymore part of the
 // PDT. We also verify this property.
 //
-// TODO: Can we change the PDT definition such that C remains part of the
-//       CFG, at best without loosing the dominance relation D postdom B.
+// TODO: Can we change the PDT definition such that C remains part of the CFG?
 TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop2) {
   StringRef ModuleString =
       "define void @f() {\n"
@@ -581,16 +568,15 @@ TEST(DominatorTree, DeletingEdgesIntroducesInfiniteLoop2) {
 
         EXPECT_EQ(DT->getNode(C2), nullptr);
         PDT->eraseNode(C2);
+        EXPECT_TRUE(DT->verify());
+        EXPECT_TRUE(PDT->verify());
 
         EXPECT_TRUE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
         EXPECT_EQ(PDT->getNode(C), nullptr);
         EXPECT_EQ(PDT->getNode(C2), nullptr);
 
-        PDT->recalculate(F);
-
-        EXPECT_TRUE(PDT->dominates(PDT->getNode(D), PDT->getNode(B)));
-        EXPECT_EQ(PDT->getNode(C), nullptr);
-        EXPECT_EQ(PDT->getNode(C2), nullptr);
+        PostDomTree Fresh(F);
+        EXPECT_EQ(PDT->compare(Fresh), false);  // Trees expected to be equal.
       });
 }
 
@@ -684,6 +670,27 @@ TEST(DominatorTree, InsertUnreachable) {
     PDT.insertEdge(From, To);
     EXPECT_TRUE(PDT.verify());
   }
+}
+
+TEST(DominatorTree, InsertFromUnreachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {{"1", "2"}, {"2", "3"}, {"3", "4"}};
+
+  std::vector<CFGBuilder::Update> Updates = {{Insert, {"3", "5"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  PostDomTree PDT(*Holder.F);
+  EXPECT_TRUE(PDT.verify());
+
+  Optional<CFGBuilder::Update> LastUpdate = B.applyUpdate();
+  EXPECT_TRUE(LastUpdate);
+
+  EXPECT_EQ(LastUpdate->Action, Insert);
+  BasicBlock *From = B.getOrAddBlock(LastUpdate->Edge.From);
+  BasicBlock *To = B.getOrAddBlock(LastUpdate->Edge.To);
+  PDT.insertEdge(From, To);
+  EXPECT_TRUE(PDT.verify());
+  EXPECT_TRUE(PDT.getRoots().size() == 2);
+  EXPECT_NE(PDT.getNode(B.getOrAddBlock("5")), nullptr);
 }
 
 TEST(DominatorTree, InsertMixed) {
@@ -874,7 +881,7 @@ TEST(DominatorTree, InsertDeleteExhaustive) {
       {Delete, {"8", "9"}},  {Delete, {"11", "12"}}};
 
   std::mt19937 Generator(0);
-  for (unsigned i = 0; i < 16; ++i) {
+  for (unsigned i = 0; i < 160; ++i) {
     std::shuffle(Updates.begin(), Updates.end(), Generator);
     CFGHolder Holder;
     CFGBuilder B(Holder.F, Arcs, Updates);
