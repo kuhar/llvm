@@ -418,6 +418,27 @@ TEST(DominatorTree, InsertUnreachable) {
   }
 }
 
+TEST(DominatorTree, InsertFromUnreachable) {
+  CFGHolder Holder;
+  std::vector<CFGBuilder::Arc> Arcs = {{"1", "2"}, {"2", "3"}, {"3", "4"}};
+
+  std::vector<CFGBuilder::Update> Updates = {{Insert, {"3", "5"}}};
+  CFGBuilder B(Holder.F, Arcs, Updates);
+  PostDomTree PDT(*Holder.F);
+  EXPECT_TRUE(PDT.verify());
+
+  Optional<CFGBuilder::Update> LastUpdate = B.applyUpdate();
+  EXPECT_TRUE(LastUpdate);
+
+  EXPECT_EQ(LastUpdate->Action, Insert);
+  BasicBlock *From = B.getOrAddBlock(LastUpdate->Edge.From);
+  BasicBlock *To = B.getOrAddBlock(LastUpdate->Edge.To);
+  PDT.insertEdge(From, To);
+  EXPECT_TRUE(PDT.verify());
+  EXPECT_TRUE(PDT.getRoots().size() == 2);
+  EXPECT_NE(PDT.getNode(B.getOrAddBlock("5")), nullptr);
+}
+
 TEST(DominatorTree, InsertMixed) {
   CFGHolder Holder;
   std::vector<CFGBuilder::Arc> Arcs = {
