@@ -267,9 +267,8 @@ class DominatorTreeBase {
      DenseMap<NodeT *, std::unique_ptr<DomTreeNodeBase<NodeT>>>;
   DomTreeNodeMapType DomTreeNodes;
   DomTreeNodeBase<NodeT> *RootNode;
-public: // HACK
   ParentPtr Parent = nullptr;
-protected: // HACK
+
   mutable bool DFSInfoValid = false;
   mutable unsigned int SlowQueries = 0;
 
