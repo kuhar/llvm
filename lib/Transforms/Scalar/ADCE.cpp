@@ -267,9 +267,10 @@ void AggressiveDeadCodeElimination::initialize() {
     auto *BB = PDTChild->getBlock();
     auto &Info = BlockInfo[BB];
     // Real function return
-    if (isa<ReturnInst>(Info.Terminator)) {
-      DEBUG(dbgs() << "post-dom root child is a return: " << BB->getName()
-                   << '\n';);
+    if (isa<ReturnInst>(Info.Terminator) ||
+        isa<UnreachableInst>(Info.Terminator)) {
+      DEBUG(dbgs() << "post-dom root child is a return or unreachable: "
+                   << BB->getName() << '\n';);
       continue;
     }
 
