@@ -26,6 +26,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -45,7 +46,7 @@ template <typename NodeT, bool IsPostDom>
 class DominatorTreeBase;
 
 namespace DomTreeBuilder {
-template <class DomTreeT>
+template <typename DomTreeT>
 struct SemiNCAInfo;
 }  // namespace DomTreeBuilder
 
@@ -190,13 +191,45 @@ namespace DomTreeBuilder {
 template <typename DomTreeT>
 void Calculate(DomTreeT &DT);
 
-template <class DomTreeT>
+template <typename DomTreeT>
 void InsertEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To);
 
-template <class DomTreeT>
+template <typename DomTreeT>
 void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To);
+
+enum class UpdateKind : unsigned char { Insert, Delete };
+
+template <typename DomTreeT>
+struct Update {
+  using NodePtr = typename DomTreeT::NodePtr;
+  using NodeKindPair = PointerIntPair<NodePtr, 1, UpdateKind>;
+
+  NodePtr From;
+  NodeKindPair ToAndKind;
+
+  Update(UpdateKind Kind, NodePtr From, NodePtr To)
+      : From(From), ToAndKind(To, Kind) {}
+
+  UpdateKind getKind() const { return ToAndKind.getInt(); }
+  NodePtr getFrom() const { return From; }
+  NodePtr getTo() const { return ToAndKind.getPointer(); }
+  bool operator==(const Update &RHS) const {
+    return From == RHS.From && ToAndKind == RHS.ToAndKind;
+  }
+
+  friend raw_ostream &operator<<(raw_ostream &OS, const Update &U) {
+    OS << (U.getKind() == UpdateKind::Insert ? "Insert " : "Delete ");
+    U.getFrom()->printAsOperand(OS, false);
+    OS << " -> ";
+    U.getTo()->printAsOperand(OS, false);
+    return OS;
+  }
+};
+
+template <typename DomTreeT>
+void ApplyUpdates(DomTreeT &DT, ArrayRef<Update<DomTreeT>> Updates);
 
 template <typename DomTreeT>
 bool Verify(const DomTreeT &DT);
@@ -219,7 +252,12 @@ class DominatorTreeBase {
   using ParentType = typename std::remove_pointer<ParentPtr>::type;
   static constexpr bool IsPostDominator = IsPostDom;
 
- protected:
+  using UpdateType = DomTreeBuilder::Update<DominatorTreeBase>;
+  using UpdateKind = DomTreeBuilder::UpdateKind;
+  static constexpr UpdateKind Insert = UpdateKind::Insert;
+  static constexpr UpdateKind Delete = UpdateKind::Delete;
+
+protected:
   // Dominators always have a single root, postdominators can have more.
   SmallVector<NodeT *, IsPostDom ? 4 : 1> Roots;
 
@@ -276,20 +314,30 @@ class DominatorTreeBase {
   bool compare(const DominatorTreeBase &Other) const {
     if (Parent != Other.Parent) return true;
 
+    //outs() << "Comparing size\n";
     const DomTreeNodeMapType &OtherDomTreeNodes = Other.DomTreeNodes;
     if (DomTreeNodes.size() != OtherDomTreeNodes.size())
       return true;
 
+    //outs() << "Comparing tree nodes\n";
     for (const auto &DomTreeNode : DomTreeNodes) {
       NodeT *BB = DomTreeNode.first;
       typename DomTreeNodeMapType::const_iterator OI =
           OtherDomTreeNodes.find(BB);
-      if (OI == OtherDomTreeNodes.end())
+
+      if (OI == OtherDomTreeNodes.end()) {
+        //outs() << "Node ";
+        //BB->printAsOperand(outs(), false);
+        //outs() << " not found in the other DT\n";
         return true;
+      }
 
       DomTreeNodeBase<NodeT> &MyNd = *DomTreeNode.second;
       DomTreeNodeBase<NodeT> &OtherNd = *OI->second;
 
+      //outs() << "Comparing equivalent nodes for ";
+      //BB->printAsOperand(outs(), false);
+      //outs() << "\n";
       if (MyNd.compare(&OtherNd))
         return true;
     }
@@ -501,6 +549,10 @@ class DominatorTreeBase {
     assert(From->getParent() == Parent);
     assert(To->getParent() == Parent);
     DomTreeBuilder::DeleteEdge(*this, From, To);
+  }
+
+  void applyUpdates(ArrayRef<UpdateType> Updates) {
+    DomTreeBuilder::ApplyUpdates(*this, Updates);
   }
 
   /// Add a new node to the dominator tree information.

@@ -21,8 +21,8 @@
 /// faster than the almost-linear O(n*alpha(n)) version, even for large CFGs.
 ///
 /// The file uses the Depth Based Search algorithm to perform incremental
-/// upates (insertion and deletions). The implemented algorithm is based on this
-/// publication:
+/// updates (insertion and deletions). The implemented algorithm is based on
+/// this publication:
 ///
 ///   An Experimental Study of Dynamic Dominators
 ///   Loukas Georgiadis, et al., April 12 2016, pp. 5-7, 9-10:
@@ -34,8 +34,10 @@
 #define LLVM_SUPPORT_GENERICDOMTREECONSTRUCTION_H
 
 #include <queue>
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/GenericDomTree.h"
@@ -81,6 +83,12 @@ struct SemiNCAInfo {
   // a dummy element.
   std::vector<NodePtr> NumToNode = {nullptr};
   DenseMap<NodePtr, InfoRec> NodeToInfo;
+
+  using UpdateT = Update<DomTreeT>;
+  SmallVector<UpdateT, 4> Updates;
+  using NodePtrAndKind = PointerIntPair<NodePtr, 1, UpdateKind>;
+  DenseMap<NodePtr, SmallDenseSet<NodePtrAndKind, 4>> FutureSuccessors;
+  DenseMap<NodePtr, SmallDenseSet<NodePtrAndKind, 4>> FuturePredecessors;
 
   void clear() {
     NumToNode = {nullptr}; // Restore to initial state with a dummy start node.
@@ -1005,6 +1013,39 @@ struct SemiNCAInfo {
   }
 
   //~~
+  //===--------------------- DomTree Batch Updater --------------------------===
+  //~~
+
+  static void LegalizeUpdates(ArrayRef<UpdateT> AllUpdates,
+                              SmallVectorImpl<UpdateT> &Result) {
+    SmallDenseMap<std::pair<NodePtr, NodePtr>, int , 4> Operations;
+    Operations.reserve(AllUpdates.size());
+
+    for (const auto &U : AllUpdates) {
+      NodePtr From = U.getFrom();
+      NodePtr To = U.getTo();
+      if (IsPostDom) std::swap(From, To);
+
+      Operations[{From, To}] += (U.getKind() == UpdateKind::Insert ? 1 : -1);
+    }
+
+    Result.clear();
+    Result.reserve(Operations.size());
+    for (auto& Op : Operations) {
+      const int NumInsertions = Op.second;
+      assert(std::abs(NumInsertions) <= 1 && "Unbalanced operations!");
+      if (NumInsertions == 0) continue;
+      const UpdateKind UK = NumInsertions > 0 ? UpdateKind::Insert
+                                              : UpdateKind::Delete;
+      Result.push_back({UK, Op.first.first, Op.first.second});
+    }
+  }
+
+  static void ApplyUpdates(DomTreeT &DT, ArrayRef<UpdateT> Updates) {
+
+  }
+
+  //~~
   //===--------------- DomTree correctness verification ---------------------===
   //~~
 
@@ -1276,6 +1317,11 @@ void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To) {
   if (DT.isPostDominator()) std::swap(From, To);
   SemiNCAInfo<DomTreeT>::DeleteEdge(DT, From, To);
+}
+
+template <class DomTreeT>
+void ApplyUpdates(DomTreeT &DT, ArrayRef<Update<DomTreeT>> Updates) {
+  SemiNCAInfo<DomTreeT>::ApplyUpdates(DT, Updates);
 }
 
 template <class DomTreeT>
