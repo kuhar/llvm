@@ -201,9 +201,8 @@ void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
 
 enum class UpdateKind : unsigned char { Insert, Delete };
 
-template <typename DomTreeT>
+template <typename NodePtr>
 struct Update {
-  using NodePtr = typename DomTreeT::NodePtr;
   using NodeKindPair = PointerIntPair<NodePtr, 1, UpdateKind>;
 
   NodePtr From;
@@ -229,7 +228,8 @@ struct Update {
 };
 
 template <typename DomTreeT>
-void ApplyUpdates(DomTreeT &DT, ArrayRef<Update<DomTreeT>> Updates);
+void ApplyUpdates(DomTreeT &DT,
+                  ArrayRef<typename DomTreeT::UpdateType> Updates);
 
 template <typename DomTreeT>
 bool Verify(const DomTreeT &DT);
@@ -252,7 +252,7 @@ class DominatorTreeBase {
   using ParentType = typename std::remove_pointer<ParentPtr>::type;
   static constexpr bool IsPostDominator = IsPostDom;
 
-  using UpdateType = DomTreeBuilder::Update<DominatorTreeBase>;
+  using UpdateType = DomTreeBuilder::Update<NodePtr>;
   using UpdateKind = DomTreeBuilder::UpdateKind;
   static constexpr UpdateKind Insert = UpdateKind::Insert;
   static constexpr UpdateKind Delete = UpdateKind::Delete;

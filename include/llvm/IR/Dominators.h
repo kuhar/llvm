@@ -41,11 +41,9 @@ namespace DomTreeBuilder {
 using BBDomTree = DomTreeBase<BasicBlock>;
 using BBPostDomTree = PostDomTreeBase<BasicBlock>;
 
-extern template struct Update<BBDomTree>;
-extern template struct Update<BBPostDomTree>;
+extern template struct Update<BasicBlock *>;
 
-using BBDomTreeUpdates = ArrayRef<Update<BBDomTree>>;
-using BBPostDomTreeUpdates = ArrayRef<Update<BBPostDomTree>>;
+using BBUpdates = ArrayRef<Update<BasicBlock *>>;
 
 extern template void Calculate<BBDomTree>(BBDomTree &DT);
 extern template void Calculate<BBPostDomTree>(BBPostDomTree &DT);
@@ -62,9 +60,8 @@ extern template void DeleteEdge<BBPostDomTree>(BBPostDomTree &DT,
                                                BasicBlock *From,
                                                BasicBlock *To);
 
-extern template void ApplyUpdates<BBDomTree>(BBDomTree &DT, BBDomTreeUpdates);
-extern template void ApplyUpdates<BBPostDomTree>(BBPostDomTree &DT,
-                                                 BBPostDomTreeUpdates);
+extern template void ApplyUpdates<BBDomTree>(BBDomTree &DT, BBUpdates);
+extern template void ApplyUpdates<BBPostDomTree>(BBPostDomTree &DT, BBUpdates);
 
 extern template bool Verify<BBDomTree>(const BBDomTree &DT);
 extern template bool Verify<BBPostDomTree>(const BBPostDomTree &DT);
