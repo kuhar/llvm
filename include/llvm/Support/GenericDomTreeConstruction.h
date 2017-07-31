@@ -81,7 +81,7 @@ struct SemiNCAInfo {
   const BatchUpdateInfo *BatchUpdates;
   using CBUPtr = const BatchUpdateInfo *;
 
-  SemiNCAInfo(const BatchUpdateInfo *BUI = nullptr) : BatchUpdates(BUI) {}
+  SemiNCAInfo(const BatchUpdateInfo *BUI) : BatchUpdates(BUI) {}
 
   void clear() {
     NumToNode = {nullptr}; // Restore to initial state with a dummy start node.
@@ -103,7 +103,7 @@ struct SemiNCAInfo {
     }
 
     using Tag = std::integral_constant<bool, Inverse>;
-    static ResultTy Get(NodePtr N, CBUPtr BUI = nullptr) {
+    static ResultTy Get(NodePtr N, CBUPtr BUI) {
       ResultTy Res = Get(N, Tag());
       if (!BUI) return Res;
 
@@ -332,10 +332,9 @@ struct SemiNCAInfo {
   // For postdominators, nodes with no forward successors are trivial roots that
   // are always selected as tree roots. Roots with forward successors correspond
   // to CFG nodes within infinite loops.
-  static bool HasForwardSuccessors(const NodePtr N) { //FIXME: Use BUI
+  static bool HasForwardSuccessors(const NodePtr N, CBUPtr BUI) {
     assert(N && "N must be a valid node");
-    using TraitsTy = GraphTraits<typename DomTreeT::ParentPtr>;
-    return TraitsTy::child_begin(N) != TraitsTy::child_end(N);
+    return !ChildrenGetter<false>::Get(N, BUI).empty();
   }
 
   static NodePtr GetEntryNode(const DomTreeT &DT) {
@@ -346,7 +345,7 @@ struct SemiNCAInfo {
   // Finds all roots without relaying on the set of roots already stored in the
   // tree.
   // We define roots to be some non-redundant set of the CFG nodes
-  static RootsT FindRoots(const DomTreeT &DT) {
+  static RootsT FindRoots(const DomTreeT &DT, CBUPtr BUI) {
     assert(DT.Parent && "Parent pointer is not set");
     RootsT Roots;
 
@@ -356,7 +355,7 @@ struct SemiNCAInfo {
       return Roots;
     }
 
-    SemiNCAInfo SNCA;
+    SemiNCAInfo SNCA(BUI);
 
     // PostDominatorTree always has a virtual root.
     SNCA.addVirtualRoot();
@@ -367,10 +366,10 @@ struct SemiNCAInfo {
     // Step #1: Find all the trivial roots that are going to will definitely
     // remain tree roots.
     unsigned Total = 0;
-    for (const NodePtr N : nodes(DT.Parent)) {
+    for (const NodePtr N : nodes(DT.Parent)) { // FIXME: Use BUI
       ++Total;
       // If it has no *successors*, it is definitely a root.
-      if (!HasForwardSuccessors(N)) {
+      if (!HasForwardSuccessors(N, BUI)) {
         Roots.push_back(N);
         // Run DFS not to walk this part of CFG later.
         Num = SNCA.runDFS(N, Num, AlwaysDescend, 1);
@@ -449,7 +448,7 @@ struct SemiNCAInfo {
     assert((Total + 1 == Num) && "Everything should have been visited");
 
     // Step #3: If we found some non-trivial roots, make them non-redundant.
-    if (HasNonTrivialRoots) RemoveRedundantRoots(DT, Roots);
+    if (HasNonTrivialRoots) RemoveRedundantRoots(DT, Roots, BUI);
 
     DEBUG(dbgs() << "Found roots: ");
     DEBUG(for (auto *Root : Roots) dbgs() << BlockNamePrinter(Root) << " ");
@@ -466,16 +465,16 @@ struct SemiNCAInfo {
   // the non-trivial roots are reverse-reachable from other non-trivial roots,
   // which makes them redundant. This function removes them from the set of
   // input roots.
-  static void RemoveRedundantRoots(const DomTreeT &DT, RootsT &Roots) {
+  static void RemoveRedundantRoots(const DomTreeT &DT, RootsT &Roots, CBUPtr BUI) {
     assert(IsPostDom && "This function is for postdominators only");
     DEBUG(dbgs() << "Removing redundant roots\n");
 
-    SemiNCAInfo SNCA;
+    SemiNCAInfo SNCA(BUI);
 
     for (unsigned i = 0; i < Roots.size(); ++i) {
       auto &Root = Roots[i];
       // Trivial roots are always non-redundant.
-      if (!HasForwardSuccessors(Root)) continue;
+      if (!HasForwardSuccessors(Root, BUI)) continue;
       DEBUG(dbgs() << "\tChecking if " << BlockNamePrinter(Root)
                    << " remains a root\n");
       SNCA.clear();
@@ -517,13 +516,18 @@ struct SemiNCAInfo {
     for (const NodePtr Root : DT.Roots) Num = runDFS(Root, Num, DC, 0);
   }
 
-  void calculateFromScratch(DomTreeT &DT) { //FIXME: Use BUI
+  static void CalculateFromScratch(DomTreeT &DT, CBUPtr BUI) {
+    auto *Parent = DT.Parent;
+    DT.reset();
+    DT.Parent = Parent;
+    SemiNCAInfo SNCA(BUI);
+
     // Step #0: Number blocks in depth-first order and initialize variables used
     // in later stages of the algorithm.
-    DT.Roots = FindRoots(DT);
-    doFullDFSWalk(DT, AlwaysDescend);
+    DT.Roots = FindRoots(DT, BUI);
+    SNCA.doFullDFSWalk(DT, AlwaysDescend);
 
-    runSemiNCA(DT);
+    SNCA.runSemiNCA(DT);
 
     if (DT.Roots.empty()) return;
 
@@ -535,7 +539,7 @@ struct SemiNCAInfo {
     DT.RootNode = (DT.DomTreeNodes[Root] =
                        llvm::make_unique<DomTreeNodeBase<NodeT>>(Root, nullptr))
         .get();
-    attachNewSubtree(DT, DT.RootNode);
+    SNCA.attachNewSubtree(DT, DT.RootNode);
   }
 
   void attachNewSubtree(DomTreeT& DT, const TreeNodePtr AttachTo) {
@@ -639,7 +643,7 @@ struct SemiNCAInfo {
     DEBUG(dbgs() << "\t\tAfter the insertion, " << BlockNamePrinter(To)
                  << " is no longer a root\n\t\tRebuilding the tree!!!\n");
 
-    DT.recalculate(*DT.Parent); // FIXME: Use BUI
+    CalculateFromScratch(DT, BUI);
     return true;
   }
 
@@ -650,11 +654,14 @@ struct SemiNCAInfo {
     assert(IsPostDom && "This function is only for postdominators");
 
     // The tree has only trivial roots -- nothing to update.
-    if (std::none_of(DT.Roots.begin(), DT.Roots.end(), HasForwardSuccessors))
+    if (std::none_of(DT.Roots.begin(), DT.Roots.end(),
+                     [BUI] (const NodePtr N) {
+                       return HasForwardSuccessors(N, BUI);
+        }))
       return;
 
     // Recalculate the set of roots.
-    DT.Roots = FindRoots(DT);
+    DT.Roots = FindRoots(DT, BUI);
     for (const NodePtr R : DT.Roots) {
       const TreeNodePtr TN = DT.getNode(R);
       // A CFG node was selected as a tree root, but the corresponding tree node
@@ -669,7 +676,7 @@ struct SemiNCAInfo {
         // It should be possible to rotate the subtree instead of recalculating
         // the whole tree, but this situation happens extremely rarely in
         // practice.
-        DT.recalculate(*DT.Parent); // FIXME: Use BUI
+        CalculateFromScratch(DT, BUI);
         return;
       }
     }
@@ -838,7 +845,8 @@ struct SemiNCAInfo {
     DEBUG(DT.print(dbgs()));
   }
 
-  static void DeleteEdge(DomTreeT &DT, const NodePtr From, const NodePtr To) {
+  static void DeleteEdge(DomTreeT &DT, const NodePtr From, const NodePtr To,
+                         CBUPtr BUI) {
     assert(From && To && "Cannot disconnect nullptrs");
     DEBUG(dbgs() << "Deleting edge " << BlockNamePrinter(From) << " -> "
                  << BlockNamePrinter(To) << "\n");
@@ -847,8 +855,8 @@ struct SemiNCAInfo {
     // Ensure that the edge was in fact deleted from the CFG before informing
     // the DomTree about it.
     // The check is O(N), so run it only in debug configuration.
-    auto IsSuccessor = [](const NodePtr SuccCandidate, const NodePtr Of) {
-      auto Successors = ChildrenGetter<IsPostDom>::Get(Of);
+    auto IsSuccessor = [BUI](const NodePtr SuccCandidate, const NodePtr Of) {
+      auto Successors = ChildrenGetter<IsPostDom>::Get(Of, BUI);
       return llvm::find(Successors, SuccCandidate) != Successors.end();
     };
     (void)IsSuccessor;
@@ -873,17 +881,17 @@ struct SemiNCAInfo {
 
     // To remains reachable after deletion.
     // (Based on the caption under Figure 4. from the second paper.)
-    if (FromTN != ToIDom || HasProperSupport(DT, ToTN))
-      DeleteReachable(DT, FromTN, ToTN);
+    if (FromTN != ToIDom || HasProperSupport(DT, ToTN, BUI))
+      DeleteReachable(DT, FromTN, ToTN, BUI);
     else
-      DeleteUnreachable(DT, ToTN);
+      DeleteUnreachable(DT, ToTN, BUI);
 
-    if (IsPostDom) UpdateRootsAfterUpdate(DT, nullptr); //FIXME: Use BUI
+    if (IsPostDom) UpdateRootsAfterUpdate(DT, BUI);
   }
 
   // Handles deletions that leave destination nodes reachable.
   static void DeleteReachable(DomTreeT &DT, const TreeNodePtr FromTN,
-                              const TreeNodePtr ToTN) {
+                              const TreeNodePtr ToTN, CBUPtr BUI) {
     DEBUG(dbgs() << "Deleting reachable " << BlockNamePrinter(FromTN) << " -> "
                  << BlockNamePrinter(ToTN) << "\n");
     DEBUG(dbgs() << "\tRebuilding subtree\n");
@@ -900,7 +908,7 @@ struct SemiNCAInfo {
     // scratch.
     if (!PrevIDomSubTree) {
       DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
-      DT.recalculate(*DT.Parent);
+      CalculateFromScratch(DT, BUI);
       return;
     }
 
@@ -912,7 +920,7 @@ struct SemiNCAInfo {
 
     DEBUG(dbgs() << "\tTop of subtree: " << BlockNamePrinter(ToIDomTN) << "\n");
 
-    SemiNCAInfo SNCA;
+    SemiNCAInfo SNCA(BUI);
     SNCA.runDFS(ToIDom, 0, DescendBelow, 0);
     DEBUG(dbgs() << "\tRunning Semi-NCA\n");
     SNCA.runSemiNCA(DT, Level);
@@ -921,10 +929,10 @@ struct SemiNCAInfo {
 
   // Checks if a node has proper support, as defined on the page 3 and later
   // explained on the page 7 of the second paper.
-  static bool HasProperSupport(DomTreeT &DT, const TreeNodePtr TN) {
+  static bool HasProperSupport(DomTreeT &DT, const TreeNodePtr TN, CBUPtr BUI) {
     DEBUG(dbgs() << "IsReachableFromIDom " << BlockNamePrinter(TN) << "\n");
     for (const NodePtr Pred :
-        ChildrenGetter<!IsPostDom>::Get(TN->getBlock())) {
+        ChildrenGetter<!IsPostDom>::Get(TN->getBlock(), BUI)) {
       DEBUG(dbgs() << "\tPred " << BlockNamePrinter(Pred) << "\n");
       if (!DT.getNode(Pred)) continue;
 
@@ -944,7 +952,8 @@ struct SemiNCAInfo {
 
   // Handle deletions that make destination node unreachable.
   // (Based on the lemma 2.7 from the second paper.)
-  static void DeleteUnreachable(DomTreeT &DT, const TreeNodePtr ToTN) {
+  static void DeleteUnreachable(DomTreeT &DT, const TreeNodePtr ToTN,
+                                CBUPtr BUI) {
     DEBUG(dbgs() << "Deleting unreachable subtree " << BlockNamePrinter(ToTN)
                  << "\n");
     assert(ToTN);
@@ -955,7 +964,7 @@ struct SemiNCAInfo {
       // Simulate that by inserting an edge from the virtual root to ToTN and
       // adding it as a new root.
       DEBUG(dbgs() << "\tDeletion made a region reverse-unreachable\n");
-      InsertReachable(DT, DT.getNode(nullptr), ToTN, nullptr); // FIXME: Use BUI
+      InsertReachable(DT, DT.getNode(nullptr), ToTN, BUI);
       DEBUG(dbgs() << "\tAdding new root " << BlockNamePrinter(ToTN) << "\n");
       DT.Roots.push_back(ToTN->getBlock());
       return;
@@ -976,7 +985,7 @@ struct SemiNCAInfo {
       return false;
     };
 
-    SemiNCAInfo SNCA;
+    SemiNCAInfo SNCA(BUI);
     unsigned LastDFSNum =
         SNCA.runDFS(ToTN->getBlock(), 0, DescendAndCollect, 0);
 
@@ -1001,7 +1010,7 @@ struct SemiNCAInfo {
     // Root reached, rebuild the whole tree from scratch.
     if (!MinNode->getIDom()) {
       DEBUG(dbgs() << "The entire tree needs to be rebuilt\n");
-      DT.recalculate(*DT.Parent);
+      CalculateFromScratch(DT, BUI);
       return;
     }
 
@@ -1138,7 +1147,7 @@ struct SemiNCAInfo {
     if (CurrentUpdate.getKind() == UpdateKind::Insert)
       InsertEdge(DT, CurrentUpdate.getFrom(), CurrentUpdate.getTo(), &BUI);
     else
-      DeleteEdge(DT, CurrentUpdate.getFrom(), CurrentUpdate.getTo());
+      DeleteEdge(DT, CurrentUpdate.getFrom(), CurrentUpdate.getTo(), &BUI);
   }
 
   //~~
@@ -1170,7 +1179,7 @@ struct SemiNCAInfo {
       }
     }
 
-    RootsT ComputedRoots = FindRoots(DT);
+    RootsT ComputedRoots = FindRoots(DT, nullptr);
     if (DT.Roots.size() != ComputedRoots.size() ||
         !std::is_permutation(DT.Roots.begin(), DT.Roots.end(),
                              ComputedRoots.begin())) {
@@ -1397,8 +1406,7 @@ struct SemiNCAInfo {
 
 template <class DomTreeT>
 void Calculate(DomTreeT &DT) {
-  SemiNCAInfo<DomTreeT> SNCA;
-  SNCA.calculateFromScratch(DT);
+  SemiNCAInfo<DomTreeT>::CalculateFromScratch(DT, nullptr);
 }
 
 template <class DomTreeT>
@@ -1412,7 +1420,7 @@ template <class DomTreeT>
 void DeleteEdge(DomTreeT &DT, typename DomTreeT::NodePtr From,
                 typename DomTreeT::NodePtr To) {
   if (DT.isPostDominator()) std::swap(From, To);
-  SemiNCAInfo<DomTreeT>::DeleteEdge(DT, From, To);
+  SemiNCAInfo<DomTreeT>::DeleteEdge(DT, From, To, nullptr);
 }
 
 template <class DomTreeT>
@@ -1423,7 +1431,7 @@ void ApplyUpdates(DomTreeT &DT,
 
 template <class DomTreeT>
 bool Verify(const DomTreeT &DT) {
-  SemiNCAInfo<DomTreeT> SNCA;
+  SemiNCAInfo<DomTreeT> SNCA(nullptr);
   return SNCA.verifyRoots(DT) && SNCA.verifyReachability(DT) &&
          SNCA.VerifyLevels(DT) && SNCA.verifyNCD(DT) &&
          SNCA.verifyParentProperty(DT) && SNCA.verifySiblingProperty(DT);

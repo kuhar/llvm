@@ -721,7 +721,6 @@ public:
 
   /// recalculate - compute a dominator tree for the given function
   void recalculate(ParentType &Func) {
-    reset();
     Parent = &Func;
     DomTreeBuilder::Calculate(*this);
   }
